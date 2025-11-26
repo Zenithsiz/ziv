@@ -65,6 +65,7 @@ impl DirReader {
 			entries:       Vec::new(),
 			sort_progress: None,
 			cur_entry:     None,
+			visitor:       None,
 		}));
 
 		#[cloned(inner)]
@@ -88,6 +89,11 @@ impl DirReader {
 			_sort_thread: sort_thread,
 			sort_thread_tx,
 		}
+	}
+
+	/// Sets the visitor
+	pub fn set_visitor(&self, visitor: impl Visitor + Send + Sync + 'static) {
+		self.inner.lock().visitor = Some(Arc::new(visitor));
 	}
 
 	/// Gets the sort order
@@ -293,7 +299,7 @@ impl DirReader {
 	}
 }
 
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 struct Inner {
 	// Invariant: All entries have the field for `sort_order` loaded.
 	entries: Vec<DirEntry>,
@@ -302,6 +308,9 @@ struct Inner {
 	sort_progress: Option<SortProgress>,
 
 	cur_entry: Option<CurEntry>,
+
+	#[debug(ignore)]
+	visitor: Option<Arc<dyn Visitor + Send + Sync>>,
 }
 
 impl Inner {
@@ -470,15 +479,19 @@ impl Inner {
 	}
 
 	/// Inserts an entry
-	pub fn insert(&mut self, idx: usize, entry: DirEntry) {
+	pub fn insert(self: &mut MutexGuard<'_, Self>, idx: usize, entry: DirEntry) {
 		// TODO: This is `O(N)`, we need a better storage
-		self.entries.insert(idx, entry);
+		self.entries.insert(idx, entry.clone());
 
 		if let Some(cur_entry) = &mut self.cur_entry &&
 			let Some(cur_idx) = &mut cur_entry.idx &&
 			*cur_idx >= idx
 		{
 			*cur_idx += 1;
+		}
+
+		if let Some(visitor) = self.visitor.as_ref().map(Arc::clone) {
+			MutexGuard::unlocked(self, || visitor.entry_added(entry));
 		}
 	}
 }
@@ -501,4 +514,10 @@ impl CurEntry {
 	pub fn path(&self) -> &Path {
 		self.entry.path()
 	}
+}
+
+/// Visitor
+pub trait Visitor {
+	/// Called when a new entry was added
+	fn entry_added(&self, dir_entry: DirEntry);
 }

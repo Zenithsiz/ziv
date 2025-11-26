@@ -106,6 +106,9 @@ impl EguiApp {
 	pub fn new(cc: &eframe::CreationContext<'_>, path: PathBuf) -> Self {
 		egui_extras::install_image_loaders(&cc.egui_ctx);
 		let dir_reader = DirReader::new(path);
+		dir_reader.set_visitor(DirReaderVisitor {
+			ctx: cc.egui_ctx.clone(),
+		});
 
 		Self {
 			dir_reader,
@@ -568,5 +571,15 @@ fn sort_order_name(sort_order: SortOrder) -> String {
 	match sort_order.reverse {
 		true => format!("{sort_order_kind} (Reverse)"),
 		false => sort_order_kind.to_owned(),
+	}
+}
+
+struct DirReaderVisitor {
+	ctx: egui::Context,
+}
+
+impl dir_reader::Visitor for DirReaderVisitor {
+	fn entry_added(&self, _dir_entry: DirEntry) {
+		self.ctx.request_repaint();
 	}
 }
