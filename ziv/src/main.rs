@@ -270,7 +270,7 @@ impl eframe::App for EguiApp {
 		};
 		let response = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 			match cur_entry.path().extension().and_then(OsStr::to_str) {
-				Some("mkv") => {
+				Some("mkv" | "gif") => {
 					let player = match &mut self.cur_player {
 						Some(player) if player.entry == cur_entry.entry => player,
 						_ => {
