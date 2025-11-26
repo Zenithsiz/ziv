@@ -1,0 +1,61 @@
+[workspace]
+
+members  = ["ziv"]
+resolver = "2"
+
+[workspace.package]
+description = "Zenithsiz's image viewer"
+edition     = "2024"
+license     = "MIT OR Apache-2.0"
+repository  = "https://github.com/zenithsiz/ziv"
+version     = "0.1.0"
+
+[workspace.dependencies]
+
+# Workspace
+ziv = { path = "ziv" }
+
+app-error    = { git = "https://github.com/Zenithsiz/app-error", rev = "e21d2eab03d97a675c4b44ccfa4df00e18d56ba7" }
+clap         = "4.5.47"
+derive_more  = "2.0.1"
+eframe       = "0.33.2"
+egui-video   = { git = "https://github.com/Zenithsiz/egui-video" }
+egui_extras  = "0.33.2"
+either       = "1.15.0"
+extend       = "1.2.0"
+image        = "0.25.6"
+itertools    = "0.14.0"
+natord       = "1.0.9"
+opener       = "0.8.3"
+serde        = "1.0.228"
+strum        = "0.27.2"
+tracing      = "0.1.41"
+zutil-cloned = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
+zutil-logger = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
+
+[workspace.lints]
+
+rust.unexpected_cfgs = { check-cfg = ['cfg(rust_analyzer)'], level = "warn" }
+
+clippy.nursery  = { level = "warn", priority = -1 }
+clippy.pedantic = { level = "warn", priority = -1 }
+
+clippy.unnecessary_self_imports = "warn"
+
+# Style
+clippy.match_bool         = "allow"
+clippy.option_if_let_else = "allow"
+clippy.similar_names      = "allow"
+clippy.single_match_else  = "allow"
+clippy.struct_field_names = "allow"
+
+# Misc
+clippy.empty_enum                   = "allow"
+clippy.items-after-statements       = "allow"
+clippy.unnecessary_debug_formatting = "allow"
+clippy.wildcard_imports             = "allow"
+
+# TODO:
+clippy.missing_errors_doc = "allow"
+clippy.missing_panics_doc = "allow"
+clippy.too_many_lines     = "allow"

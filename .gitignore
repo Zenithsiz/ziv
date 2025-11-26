@@ -1,0 +1,6 @@
+# Rust
+target
+
+# Logs
+*.log
+logs

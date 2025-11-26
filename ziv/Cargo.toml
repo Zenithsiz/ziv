@@ -1,0 +1,30 @@
+[package]
+edition     = { workspace = true }
+name        = "ziv"
+description = { workspace = true }
+license     = { workspace = true }
+version     = { workspace = true }
+repository  = { workspace = true }
+
+[dependencies]
+
+app-error    = { workspace = true }
+clap         = { features = ["derive"], workspace = true }
+derive_more  = { features = ["full"], workspace = true }
+eframe       = { workspace = true }
+egui-video   = { workspace = true }
+egui_extras  = { features = ["all_loaders"], workspace = true }
+either       = { workspace = true }
+extend       = { workspace = true }
+image        = { features = ["default-formats"], workspace = true }
+itertools    = { workspace = true }
+natord       = { workspace = true }
+opener       = { features = ["reveal"], workspace = true }
+serde        = { features = ["derive", "unstable"], workspace = true }
+strum        = { features = ["derive"], workspace = true }
+tracing      = { workspace = true }
+zutil-cloned = { workspace = true }
+zutil-logger = { workspace = true }
+
+[lints]
+workspace = true
