@@ -18,7 +18,7 @@ mod util;
 use {
 	self::{
 		args::Args,
-		dir_reader::{DirEntry, DirReader, SortOrderKind},
+		dir_reader::{DirEntry, DirReader, SortOrder, SortOrderKind},
 		util::AppError,
 	},
 	app_error::Context,
@@ -159,10 +159,16 @@ impl eframe::App for EguiApp {
 
 			toggle_pause = input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
 
-			for (key, kind) in [
-				(egui::Key::F1, SortOrderKind::FileName),
-				(egui::Key::F2, SortOrderKind::ModificationDate),
-			] {
+			let sort_orders = SortOrder::KINDS.map(|kind| {
+				let key = match kind {
+					SortOrderKind::FileName => egui::Key::F1,
+					SortOrderKind::ModificationDate => egui::Key::F2,
+				};
+
+				(key, kind)
+			});
+
+			for (key, kind) in sort_orders {
 				if input.consume_key(egui::Modifiers::NONE, key) {
 					let mut sort_order = self.dir_reader.sort_order();
 					match sort_order.kind == kind {
@@ -242,14 +248,7 @@ impl eframe::App for EguiApp {
 				ui.label(format!("View mode: {view_mode}"));
 
 				let sort_order = self.dir_reader.sort_order();
-				let sort_order_kind = match sort_order.kind {
-					SortOrderKind::FileName => "File name",
-					SortOrderKind::ModificationDate => "Modified date",
-				};
-				match sort_order.reverse {
-					true => ui.label(format!("Sort order: {sort_order_kind} (Reverse)")),
-					false => ui.label(format!("Sort order: {sort_order_kind}")),
-				};
+				ui.label(format!("Sort order: {}", self::sort_order_name(sort_order)));
 
 				if let Some(sort_progress) = self.dir_reader.sort_progress() {
 					ui.label(format!("Sorting {}/{}", sort_progress.sorted, sort_progress.total));
@@ -499,6 +498,24 @@ impl eframe::App for EguiApp {
 				{
 					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry.path(), AppError::new(&err));
 				}
+
+				ui.menu_button("Sort order", |ui| {
+					let cur_sort_order = self.dir_reader.sort_order();
+					for sort_order_kind in SortOrder::KINDS {
+						let sort_order = SortOrder {
+							reverse: match cur_sort_order.kind == sort_order_kind {
+								true => !cur_sort_order.reverse,
+								false => false,
+							},
+							kind:    sort_order_kind,
+						};
+						let name = self::sort_order_name(sort_order);
+
+						if ui.button(name).clicked() {
+							self.dir_reader.set_sort_order(sort_order);
+						}
+					}
+				});
 			});
 		}
 
@@ -538,5 +555,18 @@ impl eframe::App for EguiApp {
 		if draw_output.remove_cur_entry {
 			self.dir_reader.cur_entry_remove();
 		}
+	}
+}
+
+/// Returns the name of a sort order
+fn sort_order_name(sort_order: SortOrder) -> String {
+	let sort_order_kind = match sort_order.kind {
+		SortOrderKind::FileName => "File name",
+		SortOrderKind::ModificationDate => "Modified date",
+	};
+
+	match sort_order.reverse {
+		true => format!("{sort_order_kind} (Reverse)"),
+		false => sort_order_kind.to_owned(),
 	}
 }

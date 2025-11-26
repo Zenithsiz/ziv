@@ -6,6 +6,11 @@ pub struct SortOrder {
 	pub kind:    SortOrderKind,
 }
 
+impl SortOrder {
+	/// All kinds
+	pub const KINDS: [SortOrderKind; 2] = [SortOrderKind::FileName, SortOrderKind::ModificationDate];
+}
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SortOrderKind {
 	FileName,
