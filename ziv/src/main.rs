@@ -109,6 +109,7 @@ impl EguiApp {
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
+		dir_reader.add_allowed_extensions(["jpg", "jpeg", "png", "gif", "webp", "mkv"]);
 
 		Self {
 			dir_reader,

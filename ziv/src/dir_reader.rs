@@ -58,14 +58,15 @@ impl DirReader {
 	/// Creates a new directory reader
 	pub fn new(path: PathBuf) -> Self {
 		let inner = Arc::new(Mutex::new(Inner {
-			sort_order:    SortOrder {
+			sort_order:         SortOrder {
 				reverse: false,
 				kind:    SortOrderKind::FileName,
 			},
-			entries:       Vec::new(),
-			sort_progress: None,
-			cur_entry:     None,
-			visitor:       None,
+			entries:            vec![],
+			sort_progress:      None,
+			cur_entry:          None,
+			visitor:            None,
+			allowed_extensions: vec![],
 		}));
 
 		#[cloned(inner)]
@@ -94,6 +95,11 @@ impl DirReader {
 	/// Sets the visitor
 	pub fn set_visitor(&self, visitor: impl Visitor + Send + Sync + 'static) {
 		self.inner.lock().visitor = Some(Arc::new(visitor));
+	}
+
+	/// Adds allowed extensions
+	pub fn add_allowed_extensions(&self, extensions: impl IntoIterator<Item = &'static str>) {
+		self.inner.lock().allowed_extensions.extend(extensions);
 	}
 
 	/// Gets the sort order
@@ -223,7 +229,7 @@ impl DirReader {
 		if path
 			.extension()
 			.and_then(OsStr::to_str)
-			.is_none_or(|ext| !matches!(ext, "jpg" | "jpeg" | "png" | "gif" | "webp" | "mkv"))
+			.is_none_or(|ext| !inner.lock().allowed_extensions.contains(&ext))
 		{
 			tracing::info!("Ignoring non-image: {path:?}");
 			return Ok(());
@@ -311,6 +317,8 @@ struct Inner {
 
 	#[debug(ignore)]
 	visitor: Option<Arc<dyn Visitor + Send + Sync>>,
+
+	allowed_extensions: Vec<&'static str>,
 }
 
 impl Inner {
