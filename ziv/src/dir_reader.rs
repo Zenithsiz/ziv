@@ -188,7 +188,8 @@ impl DirReader {
 			let entry = begin_entry.insert(DirEntry::new(begin_entry_path));
 
 			let mut inner = inner.lock();
-			inner.entries.push(entry.clone());
+			let (Ok(idx) | Err(idx)) = inner.search(entry)?;
+			inner.insert(idx, entry.clone());
 			inner.cur_entry = Some(CurEntry {
 				entry: entry.clone(),
 				idx:   None,
