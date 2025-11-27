@@ -185,12 +185,9 @@ impl DirReader {
 			let begin_entry_path = path.to_owned();
 			path = path.parent().context("Path had no parent")?;
 
-			let entry = begin_entry.insert(DirEntry::new(begin_entry_path));
-
-			let mut inner = inner.lock();
-			let (Ok(idx) | Err(idx)) = inner.search(entry)?;
-			inner.insert(idx, entry.clone());
-			inner.cur_entry = Some(CurEntry {
+			let entry = Self::read_path(inner, &begin_entry_path).context("Unable to read path")?.context("Specified path was not an image")?;
+			let entry = begin_entry.insert(entry);
+			inner.lock().cur_entry = Some(CurEntry {
 				entry: entry.clone(),
 				idx:   None,
 			});
@@ -199,8 +196,16 @@ impl DirReader {
 		let dir_entries = fs::read_dir(path).context("Unable to read directory")?;
 		for entry in dir_entries {
 			let entry = entry.context("Unable to read entry")?;
+			let entry_path = entry.path();
 
-			if let Err(err) = Self::read_dir_entry(inner, begin_entry.as_ref(), &entry) {
+			// Skip if we're already added this one
+			if let Some(begin_entry) = &begin_entry &&
+				begin_entry.path() == entry_path
+			{
+				return Ok(());
+			}
+
+			if let Err(err) = Self::read_dir_entry(inner, &entry_path, &entry) {
 				tracing::warn!("Unable to read directory entry {:?}: {err:?}", entry.path());
 			}
 		}
@@ -210,21 +215,26 @@ impl DirReader {
 
 	fn read_dir_entry(
 		inner: &Arc<Mutex<Inner>>,
-		begin_entry: Option<&DirEntry>,
+		path: &Path,
 		entry: &fs::DirEntry,
-	) -> Result<(), AppError> {
-		let path = entry.path();
+	) -> Result<Option<DirEntry>, AppError> {
+		let metadata = entry.metadata().context("Unable to get metadata")?;
+		Self::read_path_with_metadata(inner, path, &metadata)
+	}
 
-		// Skip if we're already added this one
-		if let Some(begin_entry) = begin_entry &&
-			begin_entry.path() == path
-		{
-			return Ok(());
-		}
+	fn read_path(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
+		let metadata = fs::metadata(path).context("Unable to get metadata")?;
+		Self::read_path_with_metadata(inner, path, &metadata)
+	}
 
-		if entry.file_type().context("Unable to get metadata")?.is_dir() {
+	fn read_path_with_metadata(
+		inner: &Arc<Mutex<Inner>>,
+		path: &Path,
+		metadata: &fs::Metadata,
+	) -> Result<Option<DirEntry>, AppError> {
+		if metadata.is_dir() {
 			tracing::info!("Ignoring directory: {path:?}");
-			return Ok(());
+			return Ok(None);
 		}
 
 		if path
@@ -233,19 +243,19 @@ impl DirReader {
 			.is_none_or(|ext| !inner.lock().allowed_extensions.contains(&ext))
 		{
 			tracing::info!("Ignoring non-image: {path:?}");
-			return Ok(());
+			return Ok(None);
 		}
 
 		// Create the entry
-		let entry = DirEntry::new(path);
+		let entry = DirEntry::new(path.to_owned());
 
 		// Then search to where to insert it and insert it
 		let mut inner = inner.lock();
 		let (Ok(idx) | Err(idx)) = inner.search(&entry)?;
-		inner.insert(idx, entry);
+		inner.insert(idx, entry.clone());
 		drop(inner);
 
-		Ok(())
+		Ok(Some(entry))
 	}
 
 	/// Sets the sort order
