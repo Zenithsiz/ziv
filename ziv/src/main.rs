@@ -397,7 +397,6 @@ impl eframe::App for EguiApp {
 					let mut ui_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
 					let mut uv_rect = self
 						.image_zoom
-						.div_vec2(image_size)
 						.mul_vec2(window_size)
 						.translate(-ui_pos.to_vec2())
 						.div_vec2(ui_size);
@@ -445,19 +444,19 @@ impl eframe::App for EguiApp {
 							self.image_zoom = self.image_zoom.shrink2(zoom).translate(offset);
 						}
 
-						if self.image_zoom.width() > image_size.x || self.image_zoom.height() > image_size.y {
-							let scale = image_size / self.image_zoom.size();
+						if self.image_zoom.width() > 1.0 || self.image_zoom.height() > 1.0 {
+							let scale = egui::Vec2::ONE / self.image_zoom.size();
 							self.image_zoom = self.image_zoom.scale_from_center2(scale);
 						}
 
 						let mut offset = egui::Vec2::ZERO;
 
-						let min_pos = ui_pos.mul_vec2(image_size / window_size);
+						let min_pos = ui_pos.div_vec2(window_size);
 						if self.image_zoom.min.x < min_pos.x || self.image_zoom.min.y < min_pos.y {
 							offset += (min_pos - self.image_zoom.min).max(egui::Vec2::ZERO);
 						}
 
-						let max_pos = (ui_pos + ui_size).mul_vec2(image_size / window_size);
+						let max_pos = (ui_pos + ui_size).div_vec2(window_size);
 						if self.image_zoom.max.x > max_pos.x || self.image_zoom.max.y > max_pos.y {
 							offset += (max_pos - self.image_zoom.max).min(egui::Vec2::ZERO);
 						}
