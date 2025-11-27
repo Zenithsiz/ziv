@@ -19,7 +19,7 @@ use {
 	self::{
 		args::Args,
 		dir_reader::{DirEntry, DirReader, SortOrder, SortOrderKind},
-		util::AppError,
+		util::{AppError, Pos2Utils, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -86,17 +86,11 @@ enum ViewMode {
 }
 
 #[derive(Debug)]
-struct PanZoom {
-	offset: egui::Vec2,
-	zoom:   f32,
-}
-
-#[derive(Debug)]
 struct EguiApp {
 	dir_reader:     DirReader,
 	cur_player:     Option<CurPlayer>,
 	next_frame_idx: usize,
-	pan_zoom:       PanZoom,
+	image_zoom:     egui::Rect,
 	resized_image:  bool,
 	view_mode:      ViewMode,
 }
@@ -115,20 +109,14 @@ impl EguiApp {
 			dir_reader,
 			cur_player: None,
 			next_frame_idx: 0,
-			pan_zoom: PanZoom {
-				offset: egui::Vec2::ZERO,
-				zoom:   0.0,
-			},
+			image_zoom: egui::Rect::ZERO,
 			resized_image: false,
 			view_mode: ViewMode::FitWindow,
 		}
 	}
 
 	const fn reset_on_change_entry(&mut self) {
-		self.pan_zoom = PanZoom {
-			offset: egui::Vec2::ZERO,
-			zoom:   0.0,
-		};
+		self.image_zoom = egui::Rect::ZERO;
 		self.resized_image = false;
 	}
 }
@@ -150,7 +138,6 @@ impl eframe::App for EguiApp {
 		let mut escape = false;
 		let mut toggle_pause = false;
 		let mut set_sort_order = None;
-		let mut new_view_mode = false;
 		ctx.input_mut(|input| {
 			move_prev = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft);
 			move_next = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight);
@@ -191,7 +178,7 @@ impl eframe::App for EguiApp {
 			] {
 				if input.consume_key(egui::Modifiers::NONE, key) {
 					self.view_mode = view_mode;
-					new_view_mode = true;
+					self.image_zoom = egui::Rect::ZERO;
 				}
 			}
 		});
@@ -334,7 +321,6 @@ impl eframe::App for EguiApp {
 						.show_loading_spinner(false)
 						.sense(egui::Sense::click());
 
-					let window_size = ui.available_size();
 					let Some(image_size) = image.load_and_calc_size(ui, egui::Vec2::INFINITY) else {
 						ui.centered_and_justified(|ui| {
 							ui.weak("Loading...");
@@ -345,19 +331,23 @@ impl eframe::App for EguiApp {
 
 					draw_output.image_size = Some(image_size);
 
-					if !self.resized_image {
-						self.resized_image = true;
+					let window_size = match self.resized_image {
+						true => ui.available_size(),
+						false => {
+							self.resized_image = true;
 
-						let monitor_size = ui.input(|input| input.viewport().monitor_size)?;
-						let image_size_monitor = image.calc_size(monitor_size, Some(image_size));
+							let monitor_size = ui.input(|input| input.viewport().monitor_size)?;
+							let image_size_monitor = image.calc_size(monitor_size, Some(image_size));
 
 
-						draw_output.resize_size = Some(image_size_monitor);
-					}
+							draw_output.resize_size = Some(image_size_monitor);
+							image_size_monitor
+						},
+					};
 
-					if new_view_mode {
-						self.pan_zoom.offset = egui::Vec2::ZERO;
-						self.pan_zoom.zoom = 0.0;
+					// If our zoom rectangle is uninitialized, initialize it
+					if self.image_zoom == egui::Rect::ZERO {
+						self.image_zoom = egui::Rect::from_min_size(egui::Pos2::ZERO, image_size);
 					}
 
 					let window_as = window_size.y / window_size.x;
@@ -369,120 +359,129 @@ impl eframe::App for EguiApp {
 					let x_ratio = width_ratio / height_ratio;
 					let y_ratio = height_ratio / width_ratio;
 
-					let (pos, size) = match self.view_mode {
+					let (ui_pos, ui_size) = match self.view_mode {
 						ViewMode::FitWindow => {
-							let pos = match window_as > image_as {
+							let ui_pos = match window_as > image_as {
 								true => egui::pos2(0.0, window_size.y * (y_ratio - 1.0) / (2.0 * y_ratio)),
 								false => egui::pos2(window_size.x * (x_ratio - 1.0) / (2.0 * x_ratio), 0.0),
 							};
 
-							let size = match window_as > image_as {
+							let ui_size = match window_as > image_as {
 								true => egui::vec2(window_size.x, window_size.y / y_ratio),
 								false => egui::vec2(window_size.x / x_ratio, window_size.y),
 							};
 
-							(pos, size)
+							(ui_pos, ui_size)
 						},
 						ViewMode::FitWidth => {
-							let pos = match window_as > image_as {
+							let ui_pos = match window_as > image_as {
 								true => egui::pos2(0.0, window_size.y * (y_ratio - 1.0) / (2.0 * y_ratio)),
 								false => egui::Pos2::ZERO,
 							};
 
-							let size = match window_as > image_as {
+							let ui_size = match window_as > image_as {
 								true => egui::vec2(window_size.x, window_size.y / y_ratio),
 								false => egui::vec2(window_size.x, window_size.y * x_ratio),
 							};
 
-							(pos, size)
+							(ui_pos, ui_size)
 						},
 						ViewMode::ActualSize => {
-							let pos_x = match window_size.x > image_size.x {
-								true => window_size.x / 2.0 - image_size.x / 2.0,
-								false => 0.0,
-							};
+							let ui_pos = (window_size / 2.0 - image_size / 2.0).max(egui::Vec2::ZERO).to_pos2();
+							let ui_size = image_size;
 
-							let pos_y = match window_size.y > image_size.y {
-								true => window_size.y / 2.0 - image_size.y / 2.0,
-								false => 0.0,
-							};
-
-							let pos = egui::pos2(pos_x, pos_y);
-							let size = image_size;
-
-							(pos, size)
+							(ui_pos, ui_size)
 						},
 					};
-					let orig_pos = pos;
-					let orig_size = size;
 
-					fn zoom_to_scale(zoom: f32) -> f32 {
-						(zoom / 200.0).exp()
+					let mut ui_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
+					let mut uv_rect = self
+						.image_zoom
+						.div_vec2(image_size)
+						.mul_vec2(window_size)
+						.translate(-ui_pos.to_vec2())
+						.div_vec2(ui_size);
+					let window_uv_ratio = window_size / uv_rect.size();
+
+					if uv_rect.width() > 1.0 || uv_rect.height() > 1.0 {
+						ui_rect = ui_rect.scale_from_min2(uv_rect.size());
+						uv_rect = uv_rect.scale_from_min2(uv_rect.size());
 					}
-					fn scale_to_zoom(scale: f32) -> f32 {
-						scale.ln() * 200.0
+
+					if uv_rect.min.x < 0.0 || uv_rect.min.y < 0.0 {
+						let min_diff = uv_rect.min.to_vec2().min(egui::Vec2::ZERO);
+						ui_rect = ui_rect.translate(-min_diff * window_uv_ratio);
+						uv_rect = uv_rect.translate(-min_diff);
 					}
 
-					// TODO: Zoom in on where the mouse is?
-					let scale = zoom_to_scale(self.pan_zoom.zoom);
-					let pos = pos + self.pan_zoom.offset;
-					let pos = pos - (window_size / 2.0);
-					let pos = pos * scale;
-					let pos = pos + (window_size / 2.0);
-					let size = size * scale;
+					if uv_rect.max.x > 1.0 || uv_rect.max.y > 1.0 {
+						let max_diff = (egui::Vec2::ONE - uv_rect.max.to_vec2()).min(egui::Vec2::ZERO);
+						ui_rect = ui_rect.translate(max_diff * window_uv_ratio);
+						uv_rect = uv_rect.translate(max_diff);
+					}
 
-					let rect = egui::Rect {
-						min: pos,
-						max: pos + size,
-					};
-
-					let response = ui.allocate_rect(rect, egui::Sense::all());
+					let response = ui.allocate_rect(ui_rect, egui::Sense::all());
+					image.uv(uv_rect).paint_at(ui, ui_rect);
 
 					// TODO: We should allow moving on the background, but not in sub-menus,
 					//       somehow
 					ui.input(|input| {
+						let scale = self.image_zoom.size() / window_size;
 						if input.pointer.any_down() {
-							self.pan_zoom.offset += input.pointer.delta() / scale;
+							self.image_zoom = self.image_zoom.translate(-input.pointer.delta() * scale);
 						}
 
-						if input.smooth_scroll_delta.y != 0.0 {
-							self.pan_zoom.zoom += input.smooth_scroll_delta.y;
+						let scroll_delta = input.smooth_scroll_delta.y;
+						if scroll_delta != 0.0 {
+							let window_middle = egui::Pos2::ZERO + window_size / 2.0;
+							let cursor_pos = match input.pointer.latest_pos() {
+								Some(pos) => pos,
+								None => window_middle,
+							};
+
+							let zoom = 0.001 * scroll_delta * self.image_zoom.size();
+							let offset = zoom * 2.0 * (cursor_pos - window_middle) / window_size;
+
+							self.image_zoom = self.image_zoom.shrink2(zoom).translate(offset);
 						}
 
-						let min_scale = window_size / orig_size;
-						let min_scale = match self.view_mode {
-							ViewMode::FitWindow => f32::min(min_scale.x, min_scale.y),
-							ViewMode::FitWidth => f32::max(min_scale.x, min_scale.y),
-							ViewMode::ActualSize =>
-								match (window_size.x > image_size.x, window_size.y > image_size.y) {
-									(true, true) => 1.0,
-									(true, false) => min_scale.y,
-									(false, true) => min_scale.x,
-									(false, false) => f32::max(min_scale.x, min_scale.y),
-								},
-						};
-						// TODO: Perform some better rounding than this?
-						let min_zoom = (scale_to_zoom(min_scale) * 100.0).ceil() / 100.0;
-						self.pan_zoom.zoom = self.pan_zoom.zoom.max(min_zoom);
-
-						let scale = zoom_to_scale(self.pan_zoom.zoom);
-
-						let min_offset = (window_size - window_size / 2.0) / scale + window_size / 2.0 -
-							orig_pos.to_vec2() - orig_size;
-						let max_offset = (-window_size / 2.0) / scale + window_size / 2.0 - orig_pos.to_vec2();
-
-						match max_offset.x >= min_offset.x {
-							true => self.pan_zoom.offset.x = self.pan_zoom.offset.x.clamp(min_offset.x, max_offset.x),
-							false => self.pan_zoom.offset.x = 0.0,
+						if self.image_zoom.width() > image_size.x || self.image_zoom.height() > image_size.y {
+							let scale = image_size / self.image_zoom.size();
+							self.image_zoom = self.image_zoom.scale_from_center2(scale);
 						}
 
-						match max_offset.y >= min_offset.y {
-							true => self.pan_zoom.offset.y = self.pan_zoom.offset.y.clamp(min_offset.y, max_offset.y),
-							false => self.pan_zoom.offset.y = 0.0,
+						let mut offset = egui::Vec2::ZERO;
+
+						let min_pos = ui_pos.mul_vec2(image_size / window_size);
+						if self.image_zoom.min.x < min_pos.x || self.image_zoom.min.y < min_pos.y {
+							offset += (min_pos - self.image_zoom.min).max(egui::Vec2::ZERO);
 						}
+
+						let max_pos = (ui_pos + ui_size).mul_vec2(image_size / window_size);
+						if self.image_zoom.max.x > max_pos.x || self.image_zoom.max.y > max_pos.y {
+							offset += (max_pos - self.image_zoom.max).min(egui::Vec2::ZERO);
+						}
+
+						let width = self.image_zoom.width();
+						if min_pos.x + width >= max_pos.x {
+							offset.x = 0.0;
+
+							let pos = f32::midpoint(min_pos.x, max_pos.x);
+							self.image_zoom.min.x = pos - width / 2.0;
+							self.image_zoom.max.x = pos + width / 2.0;
+						}
+
+						let height = self.image_zoom.height();
+						if min_pos.y + height >= max_pos.y {
+							offset.y = 0.0;
+
+							let pos = f32::midpoint(min_pos.y, max_pos.y);
+							self.image_zoom.min.y = pos - height / 2.0;
+							self.image_zoom.max.y = pos + height / 2.0;
+						}
+
+						self.image_zoom = self.image_zoom.translate(offset);
 					});
-
-					image.paint_at(ui, rect);
 
 					Some(response)
 				},
