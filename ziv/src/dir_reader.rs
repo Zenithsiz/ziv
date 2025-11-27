@@ -16,7 +16,7 @@ pub use self::{
 use {
 	crate::util::AppError,
 	app_error::Context,
-	core::mem,
+	core::{mem, time::Duration},
 	eframe::egui::mutex::{Mutex, MutexGuard},
 	std::{
 		ffi::OsStr,
@@ -31,7 +31,7 @@ use {
 /// Directory reader
 ///
 /// This is an asynchronous (albeit non-future based) directory reader,
-/// list and cursor.
+/// list, watcher and cursor.
 ///
 /// # List
 /// This reader keeps a list of all the files read, sorted by a dynamic
@@ -39,6 +39,10 @@ use {
 ///
 /// You may change the sort order, which will remove all entries and re-
 /// insert them with the new sort order asynchronously.
+///
+/// # Watcher
+/// This reader also watches for any changes in the directory, ensuring
+/// the list stays up to date with the directory state
 ///
 /// # Cursor
 /// The list also keeps a cursor exposing both an index (based on the sort
@@ -195,6 +199,60 @@ impl DirReader {
 			});
 		}
 
+		// Before reading it, start a watcher
+		// Note: We do it *before* reading to ensure we don't miss any new files
+		//       added during the traversal later on.
+		#[cloned(inner)]
+		let event_handler = move |result: notify_debouncer_full::DebounceEventResult| match result {
+			Ok(events) =>
+				for notify_debouncer_full::DebouncedEvent { event, .. } in events {
+					tracing::trace!("Received watch event: {event:?}");
+					match event.kind {
+						notify::EventKind::Create(_) =>
+							for path in event.paths {
+								if let Err(err) = Self::read_path(&inner, &path) {
+									tracing::warn!("Unable to read path {path:?}: {err:?}");
+								}
+							},
+
+						notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::Both)) => {
+							let mut paths = event.paths.into_iter().array_chunks();
+							for [from_path, to_path] in &mut paths {
+								inner.lock().rename(&from_path, to_path);
+							}
+
+							if let Some(remaining) = paths.into_remainder() &&
+								!remaining.is_empty()
+							{
+								tracing::warn!(
+									"Ignoring remaining paths in rename event: {:?}",
+									remaining.collect::<Vec<_>>()
+								);
+							}
+						},
+
+						// TODO: `Remove` events don't seem to be emitted, just `Modify(Name(From))`,
+						//       so we also remove when that happens
+						notify::EventKind::Remove(_) |
+						notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::From)) =>
+							for path in event.paths {
+								inner.lock().remove(&path);
+							},
+						_ => tracing::trace!("Ignoring watch event"),
+					}
+				},
+			Err(errors) =>
+				for err in errors {
+					tracing::warn!("Received a filesystem error while watching: {:?}", AppError::new(&err));
+				},
+		};
+
+		let mut debouncer = notify_debouncer_full::new_debouncer(Duration::from_secs(1), None, event_handler)
+			.context("Unable to create watch debouncer")?;
+		debouncer
+			.watch(path, notify::RecursiveMode::NonRecursive)
+			.context("Unable to watch directory")?;
+
 		let dir_entries = fs::read_dir(path).context("Unable to read directory")?;
 		for entry in dir_entries {
 			let entry = entry.context("Unable to read entry")?;
@@ -212,7 +270,13 @@ impl DirReader {
 			}
 		}
 
-		Ok(())
+		// TODO: Once we implement re-reading directories, replace this with a loop over
+		//       some channel.
+		// Note: For now this is necessary to ensure we don't drop the directory watcher,
+		//       which would stop watching
+		loop {
+			std::thread::park();
+		}
 	}
 
 	fn read_dir_entry(
@@ -497,6 +561,30 @@ impl Inner {
 	/// Gets the last entry
 	pub fn last(&self) -> Option<DirEntry> {
 		self.entries.last().cloned()
+	}
+
+	/// Renames an entry
+	pub fn rename(&self, from_path: &Path, to_path: PathBuf) {
+		// TODO: Both of these are `O(N)`
+		let Some(entry) = self.entries.iter().find(|entry| entry.path() == from_path) else {
+			return;
+		};
+
+		entry.rename(to_path);
+	}
+
+	/// Removes an entry by path
+	pub fn remove(&mut self, path: &Path) -> Option<DirEntry> {
+		// TODO: Both of these are `O(N)`
+		let idx = self.entries.iter().position(|entry| entry.path() == path)?;
+		let entry = self.entries.remove(idx);
+		if let Some(cur_entry) = &self.cur_entry &&
+			cur_entry.entry == entry
+		{
+			self.cur_entry = None;
+		}
+
+		Some(entry)
 	}
 
 	/// Inserts an entry

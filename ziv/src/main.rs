@@ -6,7 +6,9 @@
 	once_cell_try,
 	stmt_expr_attributes,
 	try_blocks,
-	arbitrary_self_types
+	arbitrary_self_types,
+	iter_array_chunks,
+	exact_size_is_empty
 )]
 
 // Modules

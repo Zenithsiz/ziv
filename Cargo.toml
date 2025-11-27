@@ -15,23 +15,25 @@ version     = "0.1.0"
 # Workspace
 ziv = { path = "ziv" }
 
-app-error    = { git = "https://github.com/Zenithsiz/app-error", rev = "e21d2eab03d97a675c4b44ccfa4df00e18d56ba7" }
-clap         = "4.5.47"
-derive_more  = "2.0.1"
-eframe       = "0.33.2"
-egui-video   = { git = "https://github.com/Zenithsiz/egui-video" }
-egui_extras  = "0.33.2"
-either       = "1.15.0"
-extend       = "1.2.0"
-image        = "0.25.6"
-itertools    = "0.14.0"
-natord       = "1.0.9"
-opener       = "0.8.3"
-serde        = "1.0.228"
-strum        = "0.27.2"
-tracing      = "0.1.41"
-zutil-cloned = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
-zutil-logger = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
+app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "e21d2eab03d97a675c4b44ccfa4df00e18d56ba7" }
+clap                  = "4.5.47"
+derive_more           = "2.0.1"
+eframe                = "0.33.2"
+egui-video            = { git = "https://github.com/Zenithsiz/egui-video" }
+egui_extras           = "0.33.2"
+either                = "1.15.0"
+extend                = "1.2.0"
+image                 = "0.25.6"
+itertools             = "0.14.0"
+natord                = "1.0.9"
+notify                = "8.2.0"
+notify-debouncer-full = "0.6.0"
+opener                = "0.8.3"
+serde                 = "1.0.228"
+strum                 = "0.27.2"
+tracing               = "0.1.41"
+zutil-cloned          = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
+zutil-logger          = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
 
 [workspace.lints]
 

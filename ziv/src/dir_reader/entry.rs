@@ -73,6 +73,11 @@ impl DirEntry {
 		self.0.lock().path.clone()
 	}
 
+	/// Renames this entry
+	pub fn rename(&self, path: PathBuf) {
+		self.0.lock().path = path;
+	}
+
 	/// Compares two directory entries according to a sort order
 	pub fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
 		// TODO: This isn't foolproof unfortunately, we should do
