@@ -19,6 +19,16 @@ pub impl<T> Option<T> {
 	}
 }
 
+#[extend::ext(name = OptionGetOrTryInsert)]
+pub impl<T> Option<T> {
+	fn get_or_try_insert_with<E>(&mut self, f: impl FnOnce() -> Result<T, E>) -> Result<&mut T, E> {
+		match self {
+			Some(value) => Ok(value),
+			None => Ok(self.insert(f()?)),
+		}
+	}
+}
+
 
 #[extend::ext(name = Pos2Utils)]
 pub impl egui::Pos2 {

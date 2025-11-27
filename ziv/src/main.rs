@@ -208,6 +208,9 @@ impl eframe::App for EguiApp {
 			self.reset_on_change_entry();
 		}
 
+		let cur_entry = cur_entry;
+		let cur_entry_path = cur_entry.path();
+
 		egui::Window::new("Path")
 			.title_bar(false)
 			.resizable(false)
@@ -228,7 +231,7 @@ impl eframe::App for EguiApp {
 						None => write!(f, "?"),
 					}),
 					self.dir_reader.len(),
-					cur_entry.path().file_name().expect("Entry had no file name").display()
+					cur_entry_path.file_name().expect("Entry had no file name").display()
 				));
 
 				let view_mode = match self.view_mode {
@@ -257,12 +260,12 @@ impl eframe::App for EguiApp {
 			remove_cur_entry: false,
 		};
 		let response = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
-			match cur_entry.path().extension().and_then(OsStr::to_str) {
+			match cur_entry_path.extension().and_then(OsStr::to_str) {
 				Some("mkv" | "webm" | "gif") => {
 					let player = match &mut self.cur_player {
 						Some(player) if player.entry == cur_entry.entry => player,
 						_ => {
-							let Some(path) = cur_entry.path().to_str() else {
+							let Some(path) = cur_entry_path.to_str() else {
 								tracing::warn!("Non-utf8 video paths cannot be played currently");
 								draw_output.remove_cur_entry = true;
 								return None;
@@ -317,7 +320,7 @@ impl eframe::App for EguiApp {
 				},
 
 				_ => {
-					let image = egui::Image::from_uri(format!("file://{}", cur_entry.path().display()))
+					let image = egui::Image::from_uri(format!("file://{}", cur_entry_path.display()))
 						.show_loading_spinner(false)
 						.sense(egui::Sense::click());
 
@@ -489,15 +492,15 @@ impl eframe::App for EguiApp {
 		if let Some(response) = response.inner {
 			egui::Popup::context_menu(&response).show(|ui| {
 				if ui.button("Open").clicked() &&
-					let Err(err) = opener::open(cur_entry.path())
+					let Err(err) = opener::open(&cur_entry_path)
 				{
-					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry.path(), AppError::new(&err));
+					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
 				}
 
 				if ui.button("Open in directory").clicked() &&
-					let Err(err) = opener::reveal(cur_entry.path())
+					let Err(err) = opener::reveal(&cur_entry_path)
 				{
-					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry.path(), AppError::new(&err));
+					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
 				}
 
 				ui.menu_button("Sort order", |ui| {
@@ -545,7 +548,7 @@ impl eframe::App for EguiApp {
 					None => write!(f, "?"),
 				}),
 				self.dir_reader.len(),
-				cur_entry.path().file_name().expect("Entry had no file name").display()
+				cur_entry_path.file_name().expect("Entry had no file name").display()
 			);
 			if let Some(size) = draw_output.image_size {
 				write!(title, " {}x{}", size.x, size.y).expect("Writing to strings never fails");

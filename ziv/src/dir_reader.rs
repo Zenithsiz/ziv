@@ -185,7 +185,9 @@ impl DirReader {
 			let begin_entry_path = path.to_owned();
 			path = path.parent().context("Path had no parent")?;
 
-			let entry = Self::read_path(inner, &begin_entry_path).context("Unable to read path")?.context("Specified path was not an image")?;
+			let entry = Self::read_path(inner, &begin_entry_path)
+				.context("Unable to read path")?
+				.context("Specified path was not an image")?;
 			let entry = begin_entry.insert(entry);
 			inner.lock().cur_entry = Some(CurEntry {
 				entry: entry.clone(),
@@ -530,7 +532,7 @@ pub struct CurEntry {
 
 impl CurEntry {
 	/// Returns the path of this entry
-	pub fn path(&self) -> &Path {
+	pub fn path(&self) -> PathBuf {
 		self.entry.path()
 	}
 }
