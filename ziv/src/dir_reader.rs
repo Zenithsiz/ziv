@@ -259,7 +259,7 @@ impl DirReader {
 
 			// Skip if we're already added this one
 			if let Some(begin_entry) = &begin_entry &&
-				begin_entry.path() == entry_path
+				&*begin_entry.path() == entry_path
 			{
 				return Ok(());
 			}
@@ -592,7 +592,7 @@ impl Inner {
 	/// Renames an entry
 	pub fn rename(&self, from_path: &Path, to_path: PathBuf) {
 		// TODO: Both of these are `O(N)`
-		let Some(entry) = self.entries.iter().find(|entry| entry.path() == from_path) else {
+		let Some(entry) = self.entries.iter().find(|entry| &*entry.path() == from_path) else {
 			return;
 		};
 
@@ -602,7 +602,7 @@ impl Inner {
 	/// Removes an entry by path
 	pub fn remove(&mut self, path: &Path) -> Option<DirEntry> {
 		// TODO: Both of these are `O(N)`
-		let idx = self.entries.iter().position(|entry| entry.path() == path)?;
+		let idx = self.entries.iter().position(|entry| &*entry.path() == path)?;
 		let entry = self.entries.remove(idx);
 		if let Some(cur_entry) = &self.cur_entry &&
 			cur_entry.entry == entry
@@ -646,7 +646,7 @@ pub struct CurEntry {
 
 impl CurEntry {
 	/// Returns the path of this entry
-	pub fn path(&self) -> PathBuf {
+	pub fn path(&self) -> Arc<Path> {
 		self.entry.path()
 	}
 }

@@ -494,7 +494,7 @@ impl eframe::App for EguiApp {
 		if let Some(response) = response.inner {
 			egui::Popup::context_menu(&response).show(|ui| {
 				if ui.button("Open").clicked() &&
-					let Err(err) = opener::open(&cur_entry_path)
+					let Err(err) = opener::open(&*cur_entry_path)
 				{
 					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
 				}

@@ -9,7 +9,7 @@ use {
 	parking_lot::Mutex,
 	std::{
 		fs::{self, Metadata},
-		path::PathBuf,
+		path::{Path, PathBuf},
 		sync::Arc,
 		time::SystemTime,
 	},
@@ -17,7 +17,7 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	path:          PathBuf,
+	path:          Arc<Path>,
 	// TODO: Support non-utf-8 file names
 	file_name:     Option<String>,
 	metadata:      Option<Metadata>,
@@ -59,23 +59,23 @@ pub struct DirEntry(Arc<Mutex<Inner>>);
 
 impl DirEntry {
 	/// Creates a new directory entry
-	pub fn new(path: PathBuf) -> Self {
+	pub fn new(path: impl Into<Arc<Path>>) -> Self {
 		Self(Arc::new(Mutex::new(Inner {
-			path,
-			file_name: None,
-			metadata: None,
+			path:          path.into(),
+			file_name:     None,
+			metadata:      None,
 			modified_date: None,
 		})))
 	}
 
 	/// Returns this entry's path
-	pub fn path(&self) -> PathBuf {
-		self.0.lock().path.clone()
+	pub fn path(&self) -> Arc<Path> {
+		Arc::clone(&self.0.lock().path)
 	}
 
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
-		self.0.lock().path = path;
+		self.0.lock().path = path.into();
 	}
 
 	/// Sets the metadata of this entry
