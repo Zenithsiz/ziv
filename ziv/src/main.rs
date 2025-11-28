@@ -330,6 +330,130 @@ impl EguiApp {
 
 		image_response
 	}
+
+	/// Draws an entry
+	fn draw_entry(
+		&mut self,
+		ui: &mut egui::Ui,
+		entry: &CurEntry,
+		input: &DrawInput,
+		output: &mut DrawOutput,
+		window_response: &egui::Response,
+	) -> Option<egui::Response> {
+		let entry_path = entry.path();
+		match entry_path.extension().and_then(OsStr::to_str) {
+			Some("mkv" | "webm" | "gif") => {
+				let player = match &mut self.cur_player {
+					Some(player) if player.entry == *entry => player,
+					_ => {
+						let Some(path) = entry_path.to_str() else {
+							tracing::warn!("Non-utf8 video paths cannot be played currently");
+							output.remove_cur_entry = true;
+							return None;
+						};
+						match egui_video::Player::new(ui.ctx(), &path.to_owned()) {
+							Ok(mut player) => {
+								player.start();
+								output.resize_size = Some(player.size);
+								self.cur_player.insert(CurPlayer {
+									entry: entry.clone().into(),
+									player,
+								})
+							},
+							Err(err) => {
+								tracing::warn!("{:?}", err.context("Unable to create video player"));
+								output.remove_cur_entry = true;
+								return None;
+							},
+						}
+					},
+				};
+
+				if input.toggle_pause {
+					match player.player.player_state.get() {
+						egui_video::PlayerState::Paused => player.player.resume(),
+						egui_video::PlayerState::Playing => player.player.pause(),
+						_ => (),
+					}
+				}
+
+				output.image_size = Some(player.player.size);
+				let image_size = player.player.size;
+
+				let image = player
+					.player
+					.generate_frame_image(image_size)
+					.maintain_aspect_ratio(true)
+					.fit_to_exact_size(ui.available_size());
+
+				let window_size = ui.available_size().round_ui();
+				let image_response = Self::draw_image(
+					ui,
+					image,
+					image_size,
+					window_size,
+					&mut self.image_zoom,
+					self.view_mode,
+					window_response,
+				);
+
+				player.player.render_controls(ui, &image_response);
+				player.player.process_state();
+
+				if !entry.has_image_details() {
+					entry.set_image_details(ImageDetails::Video {});
+				}
+
+				Some(image_response)
+			},
+
+			_ => {
+				let image = egui::Image::from_uri(format!("file://{}", entry_path.display()))
+					.show_loading_spinner(false)
+					.sense(egui::Sense::click());
+
+				let Some(image_size) = image.load_and_calc_size(ui, egui::Vec2::INFINITY) else {
+					ui.centered_and_justified(|ui| {
+						ui.weak("Loading...");
+					});
+
+					return None;
+				};
+
+				output.image_size = Some(image_size);
+
+				let window_size = match self.resized_image {
+					true => ui.available_size().round_ui(),
+					false => {
+						self.resized_image = true;
+
+						let monitor_size = ui.input(|input| input.viewport().monitor_size)?;
+						let image_size_monitor = image.calc_size(monitor_size, Some(image_size)).round_ui();
+
+
+						output.resize_size = Some(image_size_monitor);
+						image_size_monitor
+					},
+				};
+
+				let image_response = Self::draw_image(
+					ui,
+					image,
+					image_size,
+					window_size,
+					&mut self.image_zoom,
+					self.view_mode,
+					window_response,
+				);
+
+				if !entry.has_image_details() {
+					entry.set_image_details(ImageDetails::Image { size: image_size });
+				}
+
+				Some(image_response)
+			},
+		}
+	}
 }
 
 impl eframe::App for EguiApp {
@@ -425,11 +549,7 @@ impl eframe::App for EguiApp {
 
 		self.draw_info_window(ctx, &cur_entry);
 
-		struct DrawOutput {
-			image_size:       Option<egui::Vec2>,
-			resize_size:      Option<egui::Vec2>,
-			remove_cur_entry: bool,
-		}
+
 		let mut draw_output = DrawOutput {
 			image_size:       None,
 			resize_size:      None,
@@ -442,124 +562,14 @@ impl eframe::App for EguiApp {
 				egui::Sense::all(),
 			);
 
-			let image_response = match cur_entry_path.extension().and_then(OsStr::to_str) {
-				Some("mkv" | "webm" | "gif") => {
-					let player = match &mut self.cur_player {
-						Some(player) if player.entry == cur_entry => player,
-						_ => {
-							let Some(path) = cur_entry_path.to_str() else {
-								tracing::warn!("Non-utf8 video paths cannot be played currently");
-								draw_output.remove_cur_entry = true;
-								return;
-							};
-							match egui_video::Player::new(ctx, &path.to_owned()) {
-								Ok(mut player) => {
-									player.start();
-									draw_output.resize_size = Some(player.size);
-									self.cur_player.insert(CurPlayer {
-										entry: cur_entry.clone().into(),
-										player,
-									})
-								},
-								Err(err) => {
-									tracing::warn!("{:?}", err.context("Unable to create video player"));
-									draw_output.remove_cur_entry = true;
-									return;
-								},
-							}
-						},
-					};
-
-					if toggle_pause {
-						match player.player.player_state.get() {
-							egui_video::PlayerState::Paused => player.player.resume(),
-							egui_video::PlayerState::Playing => player.player.pause(),
-							_ => (),
-						}
-					}
-
-					draw_output.image_size = Some(player.player.size);
-					let image_size = player.player.size;
-
-					let image = player
-						.player
-						.generate_frame_image(image_size)
-						.maintain_aspect_ratio(true)
-						.fit_to_exact_size(ui.available_size());
-
-					let window_size = ui.available_size().round_ui();
-					let image_response = Self::draw_image(
-						ui,
-						image,
-						image_size,
-						window_size,
-						&mut self.image_zoom,
-						self.view_mode,
-						&window_response,
-					);
-
-					player.player.render_controls(ui, &image_response);
-					player.player.process_state();
-
-					if !cur_entry.has_image_details() {
-						cur_entry.set_image_details(ImageDetails::Video {});
-					}
-
-					image_response
-				},
-
-				_ => {
-					let image = egui::Image::from_uri(format!("file://{}", cur_entry_path.display()))
-						.show_loading_spinner(false)
-						.sense(egui::Sense::click());
-
-					let Some(image_size) = image.load_and_calc_size(ui, egui::Vec2::INFINITY) else {
-						ui.centered_and_justified(|ui| {
-							ui.weak("Loading...");
-						});
-
-						return;
-					};
-
-					draw_output.image_size = Some(image_size);
-
-					let window_size = match self.resized_image {
-						true => ui.available_size().round_ui(),
-						false => {
-							self.resized_image = true;
-
-							let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size) else {
-								return;
-							};
-							let image_size_monitor = image.calc_size(monitor_size, Some(image_size)).round_ui();
-
-
-							draw_output.resize_size = Some(image_size_monitor);
-							image_size_monitor
-						},
-					};
-
-					let image_response = Self::draw_image(
-						ui,
-						image,
-						image_size,
-						window_size,
-						&mut self.image_zoom,
-						self.view_mode,
-						&window_response,
-					);
-
-					if !cur_entry.has_image_details() {
-						cur_entry.set_image_details(ImageDetails::Image { size: image_size });
-					}
-
-					image_response
-				},
+			let draw_input = DrawInput { toggle_pause };
+			let response = match self.draw_entry(ui, &cur_entry, &draw_input, &mut draw_output, &window_response) {
+				Some(response) => response.union(window_response),
+				None => window_response,
 			};
 
 			// Merge the window response with the image so we catch events on both
-			let window_response = window_response.union(image_response);
-			egui::Popup::context_menu(&window_response).show(|ui| {
+			egui::Popup::context_menu(&response).show(|ui| {
 				if ui.button("Open").clicked() &&
 					let Err(err) = opener::open(&*cur_entry_path)
 				{
@@ -646,4 +656,14 @@ macro write_str(
 	$($t:tt)*
 ) {
 	write!( $($t)* ).expect("Writing into strings cannot fail")
+}
+
+struct DrawInput {
+	toggle_pause: bool,
+}
+
+struct DrawOutput {
+	image_size:       Option<egui::Vec2>,
+	resize_size:      Option<egui::Vec2>,
+	remove_cur_entry: bool,
 }
