@@ -34,6 +34,17 @@ pub impl<T> Option<T> {
 	}
 }
 
+#[extend::ext(name = OptionInspectNone)]
+pub impl<T> Option<T> {
+	fn inspect_none(self, f: impl FnOnce()) -> Self {
+		if self.is_none() {
+			f();
+		}
+
+		self
+	}
+}
+
 
 #[extend::ext(name = Pos2Utils)]
 pub impl egui::Pos2 {

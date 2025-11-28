@@ -3,14 +3,14 @@
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::AppError,
+	crate::util::{AppError, OptionInspectNone},
 	app_error::Context,
 	core::cmp::Ordering,
 	parking_lot::Mutex,
 	std::{
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
-		sync::{Arc, OnceLock},
+		sync::{Arc, OnceLock, mpsc},
 		time::SystemTime,
 	},
 };
@@ -18,6 +18,12 @@ use {
 #[derive(Debug)]
 struct Inner {
 	path: Mutex<Arc<Path>>,
+
+	// TODO: Is this a good idea?
+	loader_tx: mpsc::Sender<(DirEntry, EntryLoadField)>,
+
+	// TODO: Store the errors so we don't attempt to get some of these repeatedly
+	//       in cases where the user doesn't remove the entry on error?
 
 	// TODO: Support non-utf-8 file names
 	file_name:     OnceLock<String>,
@@ -32,7 +38,7 @@ impl Inner {
 		Arc::clone(&self.path.lock())
 	}
 
-	fn update_file_name(&self) -> Result<&String, AppError> {
+	fn load_file_name(&self) -> Result<&String, AppError> {
 		self.file_name.get_or_try_init(|| try {
 			let path = self.path();
 			path.file_name()
@@ -43,25 +49,25 @@ impl Inner {
 		})
 	}
 
-	fn update_metadata(&self) -> Result<&Metadata, AppError> {
+	fn load_metadata(&self) -> Result<&Metadata, AppError> {
 		self.metadata.get_or_try_init(|| {
 			let path = self.path();
 			fs::metadata(path).context("Unable to get metadata")
 		})
 	}
 
-	fn update_modified_date(&self) -> Result<&SystemTime, AppError> {
+	fn load_modified_date(&self) -> Result<&SystemTime, AppError> {
 		self.modified_date.get_or_try_init(|| {
-			self.update_metadata()
+			self.load_metadata()
 				.context("Unable to get metadata")?
 				.modified()
 				.context("Unable to get system time")
 		})
 	}
 
-	fn update_size(&self) -> Result<&u64, AppError> {
+	fn load_size(&self) -> Result<&u64, AppError> {
 		self.size.get_or_try_init(|| {
-			let metadata = self.update_metadata().context("Unable to get metadata")?;
+			let metadata = self.load_metadata().context("Unable to get metadata")?;
 			Ok(metadata.len())
 		})
 	}
@@ -72,13 +78,14 @@ pub struct DirEntry(Arc<Inner>);
 
 impl DirEntry {
 	/// Creates a new directory entry
-	pub(super) fn new(path: impl Into<Arc<Path>>) -> Self {
+	pub(super) fn new(path: impl Into<Arc<Path>>, loader_tx: mpsc::Sender<(Self, EntryLoadField)>) -> Self {
 		Self(Arc::new(Inner {
-			path:          Mutex::new(path.into()),
-			file_name:     OnceLock::new(),
-			metadata:      OnceLock::new(),
+			path: Mutex::new(path.into()),
+			loader_tx,
+			file_name: OnceLock::new(),
+			metadata: OnceLock::new(),
 			modified_date: OnceLock::new(),
-			size:          OnceLock::new(),
+			size: OnceLock::new(),
 			image_details: Mutex::new(None),
 		}))
 	}
@@ -114,14 +121,14 @@ impl DirEntry {
 	}
 
 	/// Returns this image's file size
-	pub fn size(&self) -> Result<u64, AppError> {
-		// TODO: This can block, we should just try to get the field
-		//       and have the user load it elsewhere.
-		self.0.update_size().copied()
+	pub fn size(&self) -> Option<u64> {
+		self.0.size.get().copied().inspect_none(|| {
+			_ = self.0.loader_tx.send((self.clone(), EntryLoadField::Size));
+		})
 	}
 
 	/// Compares two directory entries according to a sort order
-	pub fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
+	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
 		let cmp = match order.kind {
 			SortOrderKind::FileName => natord::compare(self.0.file_name.get()?, other.0.file_name.get()?),
 			SortOrderKind::ModificationDate =>
@@ -135,19 +142,27 @@ impl DirEntry {
 		}
 	}
 
-	/// Loads the necessary fields for `order`
-	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
-		match order.kind {
-			SortOrderKind::FileName => _ = self.0.update_file_name().context("Unable to update file name")?,
-			SortOrderKind::ModificationDate =>
-				_ = self
-					.0
-					.update_modified_date()
-					.context("Unable to update modified date")?,
-			SortOrderKind::Size => _ = self.0.update_size().context("Unable to update size")?,
+	/// Loads a field
+	pub(super) fn load_field(&self, field: EntryLoadField) -> Result<(), AppError> {
+		match field {
+			EntryLoadField::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
+			EntryLoadField::Metadata => _ = self.0.load_file_name().context("Unable to load metadata")?,
+			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
+			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
 		}
 
 		Ok(())
+	}
+
+	/// Loads the necessary fields for `order`
+	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
+		let field = match order.kind {
+			SortOrderKind::FileName => EntryLoadField::FileName,
+			SortOrderKind::ModificationDate => EntryLoadField::ModifiedDate,
+			SortOrderKind::Size => EntryLoadField::Size,
+		};
+
+		self.load_field(field)
 	}
 }
 
@@ -164,4 +179,14 @@ impl Eq for DirEntry {}
 pub enum ImageDetails {
 	Image { size: egui::Vec2 },
 	Video {},
+}
+
+/// An entry's field to load
+#[derive(Clone, Copy, Debug)]
+pub enum EntryLoadField {
+	FileName,
+	#[expect(dead_code, reason = "Nothing needs it yet")]
+	Metadata,
+	ModifiedDate,
+	Size,
 }

@@ -14,6 +14,7 @@ pub use self::{
 
 // Imports
 use {
+	self::entry::EntryLoadField,
 	crate::util::AppError,
 	app_error::Context,
 	core::{mem, time::Duration},
@@ -53,6 +54,7 @@ pub struct DirReader {
 
 	_read_thread: thread::JoinHandle<()>,
 	_sort_thread: thread::JoinHandle<()>,
+	_load_thread: thread::JoinHandle<()>,
 
 	sort_thread_tx: mpsc::Sender<SortOrder>,
 }
@@ -60,16 +62,18 @@ pub struct DirReader {
 impl DirReader {
 	/// Creates a new directory reader
 	pub fn new(path: PathBuf) -> Self {
+		let (load_thread_tx, load_thread_rx) = mpsc::channel();
 		let inner = Arc::new(Mutex::new(Inner {
-			sort_order:         SortOrder {
+			sort_order: SortOrder {
 				reverse: false,
 				kind:    SortOrderKind::FileName,
 			},
-			entries:            vec![],
-			sort_progress:      None,
-			cur_entry:          None,
-			visitor:            None,
+			entries: vec![],
+			sort_progress: None,
+			cur_entry: None,
+			visitor: None,
 			allowed_extensions: vec![],
+			load_thread_tx,
 		}));
 
 		#[cloned(inner)]
@@ -87,10 +91,17 @@ impl DirReader {
 			tracing::warn!("Sorting thread returned");
 		});
 
+		#[cloned(inner)]
+		let load_thread = thread::spawn(move || {
+			Self::load_fields(&inner, &load_thread_rx);
+			tracing::warn!("Loader thread returned");
+		});
+
 		Self {
 			inner,
 			_read_thread: read_thread,
 			_sort_thread: sort_thread,
+			_load_thread: load_thread,
 			sort_thread_tx,
 		}
 	}
@@ -313,13 +324,13 @@ impl DirReader {
 		}
 
 		// Create the entry and add the metadata if we already have it
-		let entry = DirEntry::new(path.to_owned());
+		let mut inner = inner.lock();
+		let entry = DirEntry::new(path.to_owned(), inner.load_thread_tx.clone());
 		if let Some(metadata) = metadata.try_into_metadata() {
 			entry.set_metadata(metadata);
 		}
 
 		// Then search to where to insert it and insert it
-		let mut inner = inner.lock();
 		let (Ok(idx) | Err(idx)) = inner.search(&entry)?;
 		inner.insert(idx, entry.clone());
 		drop(inner);
@@ -383,6 +394,17 @@ impl DirReader {
 			inner.sort_progress = None;
 		}
 	}
+
+	/// Loads fields on an entry
+	fn load_fields(inner: &Arc<Mutex<Inner>>, rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>) {
+		while let Ok((entry, field)) = rx.recv() {
+			if let Err(err) = entry.load_field(field) {
+				let path = entry.path();
+				tracing::warn!("Unable to load entry {path:?} field {field:?}, removing: {err:?}");
+				inner.lock().remove(&path);
+			}
+		}
+	}
 }
 
 enum MetadataOrFileType {
@@ -422,6 +444,8 @@ struct Inner {
 	visitor: Option<Arc<dyn Visitor + Send + Sync>>,
 
 	allowed_extensions: Vec<&'static str>,
+
+	load_thread_tx: mpsc::Sender<(DirEntry, EntryLoadField)>,
 }
 
 impl Inner {

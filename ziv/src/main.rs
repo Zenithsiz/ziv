@@ -144,14 +144,8 @@ impl EguiApp {
 			}
 		}
 
-		match cur_entry.size() {
-			Ok(size) => {
-				write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
-			},
-			Err(err) => {
-				tracing::warn!("Unable to get entry size, removing {:?}: {err:?}", cur_entry.path());
-				self.dir_reader.cur_entry_remove();
-			},
+		if let Some(size) = cur_entry.size() {
+			write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
 		}
 
 		title
