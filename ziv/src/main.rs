@@ -543,6 +543,7 @@ impl eframe::App for EguiApp {
 		let mut move_last = false;
 		let mut fullscreen = false;
 		let mut escape = false;
+		let mut quit = false;
 		let mut toggle_pause = false;
 		let mut set_sort_order = None;
 		ctx.input_mut(|input| {
@@ -556,6 +557,7 @@ impl eframe::App for EguiApp {
 			escape = input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
 
 			toggle_pause = input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
+			quit = input.consume_key(egui::Modifiers::NONE, egui::Key::Q);
 
 			let sort_orders = SortOrder::KINDS.map(|kind| {
 				let key = match kind {
@@ -691,6 +693,10 @@ impl eframe::App for EguiApp {
 				true => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false)),
 				false => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
 			}
+		}
+
+		if quit {
+			ctx.send_viewport_cmd(egui::ViewportCommand::Close);
 		}
 
 		// TODO: Don't change the title each frame?
