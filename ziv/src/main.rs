@@ -15,6 +15,7 @@
 // Modules
 mod args;
 mod dir_reader;
+mod shortcut;
 mod util;
 
 // Imports
@@ -22,6 +23,7 @@ use {
 	self::{
 		args::Args,
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
+		shortcut::Shortcuts,
 		util::{AppError, Pos2Utils},
 	},
 	app_error::Context,
@@ -31,6 +33,7 @@ use {
 	indexmap::IndexSet,
 	itertools::Itertools,
 	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode},
+	strum::VariantArray,
 	zutil_logger::Logger,
 };
 
@@ -84,7 +87,9 @@ struct CurPlayer {
 	player: egui_video::Player,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(strum::VariantArray)]
+#[derive(serde::Serialize, serde::Deserialize)]
 enum ViewMode {
 	FitWindow,
 	FitWidth,
@@ -99,6 +104,7 @@ struct EguiApp {
 	image_zoom:     egui::Rect,
 	resized_image:  bool,
 	view_mode:      ViewMode,
+	shortcuts:      Shortcuts,
 
 	/// Entries we're loaded
 	loaded_entries:     IndexSet<DirEntry>,
@@ -124,6 +130,7 @@ impl EguiApp {
 			view_mode: ViewMode::FitWindow,
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
+			shortcuts: Shortcuts::default(),
 		}
 	}
 
@@ -556,34 +563,24 @@ impl eframe::App for EguiApp {
 		let mut move_first = false;
 		let mut move_last = false;
 		let mut fullscreen = false;
-		let mut escape = false;
+		let mut exit_fullscreen_or_quit = false;
 		let mut quit = false;
 		let mut toggle_pause = false;
 		let mut set_sort_order = None;
 		ctx.input_mut(|input| {
-			move_prev = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft);
-			move_next = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight);
+			move_prev = input.consume_key(egui::Modifiers::NONE, self.shortcuts.prev);
+			move_next = input.consume_key(egui::Modifiers::NONE, self.shortcuts.next);
 
-			move_first = input.consume_key(egui::Modifiers::NONE, egui::Key::Home);
-			move_last = input.consume_key(egui::Modifiers::NONE, egui::Key::End);
+			move_first = input.consume_key(egui::Modifiers::NONE, self.shortcuts.first);
+			move_last = input.consume_key(egui::Modifiers::NONE, self.shortcuts.last);
 
-			fullscreen = input.consume_key(egui::Modifiers::NONE, egui::Key::F);
-			escape = input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+			fullscreen = input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
+			exit_fullscreen_or_quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.exit_fullscreen_or_quit);
 
-			toggle_pause = input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
-			quit = input.consume_key(egui::Modifiers::NONE, egui::Key::Q);
+			toggle_pause = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_pause);
+			quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.quit);
 
-			let sort_orders = SortOrder::KINDS.map(|kind| {
-				let key = match kind {
-					SortOrderKind::FileName => egui::Key::F1,
-					SortOrderKind::ModificationDate => egui::Key::F2,
-					SortOrderKind::Size => egui::Key::F3,
-				};
-
-				(key, kind)
-			});
-
-			for (key, kind) in sort_orders {
+			for (&kind, &key) in &self.shortcuts.sort {
 				if input.consume_key(egui::Modifiers::NONE, key) {
 					let mut sort_order = self.dir_reader.sort_order();
 					match sort_order.kind == kind {
@@ -595,11 +592,7 @@ impl eframe::App for EguiApp {
 				}
 			}
 
-			for (key, view_mode) in [
-				(egui::Key::Num1, ViewMode::FitWindow),
-				(egui::Key::Num2, ViewMode::FitWidth),
-				(egui::Key::Num3, ViewMode::ActualSize),
-			] {
+			for (&view_mode, &key) in &self.shortcuts.view_modes {
 				if input.consume_key(egui::Modifiers::NONE, key) {
 					self.view_mode = view_mode;
 					self.image_zoom = egui::Rect::ZERO;
@@ -671,7 +664,7 @@ impl eframe::App for EguiApp {
 
 				ui.menu_button("Sort order", |ui| {
 					let cur_sort_order = self.dir_reader.sort_order();
-					for sort_order_kind in SortOrder::KINDS {
+					for &sort_order_kind in SortOrderKind::VARIANTS {
 						let sort_order = SortOrder {
 							reverse: match cur_sort_order.kind == sort_order_kind {
 								true => !cur_sort_order.reverse,
@@ -702,7 +695,7 @@ impl eframe::App for EguiApp {
 			ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
 		}
 
-		if escape {
+		if exit_fullscreen_or_quit {
 			match is_fullscreen {
 				true => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false)),
 				false => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

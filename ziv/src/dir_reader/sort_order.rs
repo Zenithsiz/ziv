@@ -6,16 +6,9 @@ pub struct SortOrder {
 	pub kind:    SortOrderKind,
 }
 
-impl SortOrder {
-	/// All kinds
-	pub const KINDS: [SortOrderKind; 3] = [
-		SortOrderKind::FileName,
-		SortOrderKind::ModificationDate,
-		SortOrderKind::Size,
-	];
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(strum::VariantArray)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum SortOrderKind {
 	FileName,
 	ModificationDate,
