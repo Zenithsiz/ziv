@@ -1,7 +1,13 @@
 //! Utilities
 
 // Imports
-use {core::cmp, eframe::egui};
+use {
+	app_error::Context,
+	core::cmp,
+	eframe::egui,
+	serde::de::DeserializeOwned,
+	std::{fs, path::Path},
+};
 
 /// Error type for the crate.
 pub type AppError = app_error::AppError<()>;
@@ -66,5 +72,23 @@ pub impl egui::Rect {
 		(self.translate(-self.min.to_vec2()))
 			.div_vec2(scale)
 			.translate(self.min.to_vec2())
+	}
+}
+
+/// Hot reloads a numeric value from a file
+#[expect(dead_code, reason = "It should only be used for debugging")]
+pub fn hot_reload<T: DeserializeOwned>(path: impl AsRef<Path>, default: T) -> T {
+	let path = path.as_ref();
+	let res: Result<_, AppError> = try {
+		let contents = fs::read(path).context("Unable to read file")?;
+		toml::from_slice(&contents).context("Unable to parse file")?
+	};
+
+	match res {
+		Ok(num) => num,
+		Err(err) => {
+			tracing::warn!("Unable to hot-reload value from file {path:?}: {err:?}");
+			default
+		},
 	}
 }

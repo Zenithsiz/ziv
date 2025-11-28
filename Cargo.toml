@@ -19,6 +19,7 @@ app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = 
 clap                  = "4.5.47"
 derive_more           = "2.0.1"
 eframe                = "0.33.2"
+egui                  = "0.33.2"
 egui-video            = { git = "https://github.com/Zenithsiz/egui-video" }
 egui_extras           = "0.33.2"
 either                = "1.15.0"
@@ -33,6 +34,7 @@ opener                = "0.8.3"
 parking_lot           = "0.12.5"
 serde                 = "1.0.228"
 strum                 = "0.27.2"
+toml                  = "0.9.8"
 tracing               = "0.1.41"
 walkdir               = "2.5.0"
 zutil-cloned          = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
