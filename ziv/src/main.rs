@@ -9,7 +9,8 @@
 	arbitrary_self_types,
 	iter_array_chunks,
 	exact_size_is_empty,
-	decl_macro
+	decl_macro,
+	seek_stream_len
 )]
 
 // Modules
@@ -155,6 +156,16 @@ impl EguiApp {
 						},
 						ImageDetails::Video {} => (),
 					}
+				}
+
+				match cur_entry.entry.size() {
+					Ok(size) => {
+						write_str!(info, " {}", humansize::format_size(size, humansize::BINARY));
+					},
+					Err(err) => {
+						tracing::warn!("Unable to get entry size, removing {:?}: {err:?}", cur_entry.path());
+						self.dir_reader.cur_entry_remove();
+					},
 				}
 
 				let view_mode = match self.view_mode {

@@ -16,6 +16,7 @@ egui-video            = { workspace = true }
 egui_extras           = { features = ["all_loaders"], workspace = true }
 either                = { workspace = true }
 extend                = { workspace = true }
+humansize             = { workspace = true }
 image                 = { features = ["default-formats"], workspace = true }
 itertools             = { workspace = true }
 natord                = { workspace = true }

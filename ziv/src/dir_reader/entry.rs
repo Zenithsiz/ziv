@@ -18,11 +18,16 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	path:          Arc<Path>,
+	path: Arc<Path>,
+
+	// TODO: Store the errors so we don't attempt to get some of these repeatedly
+	//       in cases where the user doesn't remove the entry on error?
+
 	// TODO: Support non-utf-8 file names
 	file_name:     Option<String>,
 	metadata:      Option<Metadata>,
 	modified_date: Option<SystemTime>,
+	size:          Option<u64>,
 	image_details: Option<ImageDetails>,
 }
 
@@ -54,6 +59,29 @@ impl Inner {
 				.context("Unable to get system time")
 		})
 	}
+
+	fn update_size(&mut self) -> Result<&mut u64, AppError> {
+		self.update_metadata().context("Unable to get metadata")?;
+
+		self.size.get_or_try_insert_with(|| {
+			#[cfg(any(unix, windows))]
+			let metadata = self.metadata.as_ref().expect("Just initialized");
+
+			#[cfg(unix)]
+			let size = std::os::unix::prelude::MetadataExt::size(metadata);
+
+			#[cfg(windows)]
+			let size = std::os::windows::prelude::MetadataExt::file_size(metadata);
+
+			#[cfg(not(any(unix, windows)))]
+			let size = {
+				let mut file = fs::File::open(&self.path).context("Unable to open file")?;
+				std::io::Seek::stream_len(&mut file).context("Unable to get file len")?
+			};
+
+			Ok(size)
+		})
+	}
 }
 
 #[derive(Clone, derive_more::Debug)]
@@ -67,6 +95,7 @@ impl DirEntry {
 			file_name:     None,
 			metadata:      None,
 			modified_date: None,
+			size:          None,
 			image_details: None,
 		})))
 	}
@@ -99,6 +128,11 @@ impl DirEntry {
 	/// Sets the image details of this entry
 	pub fn set_image_details(&self, image_details: ImageDetails) {
 		self.0.lock().image_details = Some(image_details);
+	}
+
+	/// Returns this image's file size
+	pub fn size(&self) -> Result<u64, AppError> {
+		self.0.lock().update_size().copied()
 	}
 
 	/// Compares two directory entries according to a sort order
