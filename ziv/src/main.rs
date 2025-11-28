@@ -20,7 +20,7 @@ mod util;
 use {
 	self::{
 		args::Args,
-		dir_reader::{DirEntry, DirReader, SortOrder, SortOrderKind},
+		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind},
 		util::{AppError, Pos2Utils, RectUtils},
 	},
 	app_error::Context,
@@ -121,6 +121,47 @@ impl EguiApp {
 		self.image_zoom = egui::Rect::ZERO;
 		self.resized_image = false;
 	}
+
+	/// Draws the info window
+	fn draw_info_window(&self, ctx: &egui::Context, cur_entry: &CurEntry) {
+		egui::Window::new("Path")
+			.title_bar(false)
+			.resizable(false)
+			.frame(egui::Frame {
+				inner_margin: egui::Margin::symmetric(1, 1),
+				fill: egui::Color32::from_rgba_premultiplied(0, 0, 0, 128),
+				..egui::Frame::NONE
+			})
+			.anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
+			.default_width(ctx.available_rect().width())
+			.show(ctx, |ui| {
+				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
+
+				ui.label(format!(
+					"{}/{}: {}",
+					std::fmt::from_fn(|f| match cur_entry.idx {
+						Some(idx) => write!(f, "{}", idx + 1),
+						None => write!(f, "?"),
+					}),
+					self.dir_reader.len(),
+					cur_entry.path().file_name().expect("Entry had no file name").display()
+				));
+
+				let view_mode = match self.view_mode {
+					ViewMode::FitWindow => "Fit window",
+					ViewMode::FitWidth => "Fit width",
+					ViewMode::ActualSize => "Actual size",
+				};
+				ui.label(format!("View mode: {view_mode}"));
+
+				let sort_order = self.dir_reader.sort_order();
+				ui.label(format!("Sort order: {}", self::sort_order_name(sort_order)));
+
+				if let Some(sort_progress) = self.dir_reader.sort_progress() {
+					ui.label(format!("Sorting {}/{}", sort_progress.sorted, sort_progress.total));
+				}
+			});
+	}
 }
 
 impl eframe::App for EguiApp {
@@ -213,43 +254,7 @@ impl eframe::App for EguiApp {
 		let cur_entry = cur_entry;
 		let cur_entry_path = cur_entry.path();
 
-		egui::Window::new("Path")
-			.title_bar(false)
-			.resizable(false)
-			.frame(egui::Frame {
-				inner_margin: egui::Margin::symmetric(1, 1),
-				fill: egui::Color32::from_rgba_premultiplied(0, 0, 0, 128),
-				..egui::Frame::NONE
-			})
-			.anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
-			.default_width(ctx.available_rect().width())
-			.show(ctx, |ui| {
-				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
-
-				ui.label(format!(
-					"{}/{}: {}",
-					std::fmt::from_fn(|f| match cur_entry.idx {
-						Some(idx) => write!(f, "{}", idx + 1),
-						None => write!(f, "?"),
-					}),
-					self.dir_reader.len(),
-					cur_entry_path.file_name().expect("Entry had no file name").display()
-				));
-
-				let view_mode = match self.view_mode {
-					ViewMode::FitWindow => "Fit window",
-					ViewMode::FitWidth => "Fit width",
-					ViewMode::ActualSize => "Actual size",
-				};
-				ui.label(format!("View mode: {view_mode}"));
-
-				let sort_order = self.dir_reader.sort_order();
-				ui.label(format!("Sort order: {}", self::sort_order_name(sort_order)));
-
-				if let Some(sort_progress) = self.dir_reader.sort_progress() {
-					ui.label(format!("Sorting {}/{}", sort_progress.sorted, sort_progress.total));
-				}
-			});
+		self.draw_info_window(ctx, &cur_entry);
 
 		struct DrawOutput {
 			image_size:       Option<egui::Vec2>,
