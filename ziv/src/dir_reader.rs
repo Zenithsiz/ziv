@@ -493,6 +493,10 @@ impl Inner {
 		}
 
 		self.cur_entry = None;
+
+		// TODO: When removed, it'd be jarring to reset to the first entry,
+		//       should we just try to reset it to the previous / next entry,
+		//       if they exist?
 	}
 
 	/// Advances the current entry.
