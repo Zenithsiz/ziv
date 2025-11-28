@@ -28,6 +28,7 @@ use {
 	clap::Parser,
 	egui::emath::GuiRounding,
 	indexmap::IndexSet,
+	itertools::Itertools,
 	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode},
 	zutil_logger::Logger,
 };
@@ -414,16 +415,47 @@ impl EguiApp {
 				//       `entry.remove_texture`, otherwise the texture would be
 				//       "leaked" (as-in, it would be outside `loaded_entries`
 				//       while being loaded)
-				// TODO: We should probably remove the further one instead, since
-				//       otherwise we could be removing the very next one the user
-				//       requests.
 				let image_texture = input.entry.texture();
 				self.loaded_entries.insert(input.entry.clone().into());
 				if self.loaded_entries.len() > self.max_loaded_entries {
+					// Try to get the indices or all entries (including the current)
+					let idxs: Option<_> = try {
+						let cur_idx = input.entry.idx?;
+
+						// TODO: Don't ignore errors here?
+						// TODO: This could be somewhat expensive, can we
+						//       cache this somehow?
+						let entry_idxs = self
+							.loaded_entries
+							.iter()
+							.map(|entry| self.dir_reader.idx_of(entry).ok().flatten())
+							.collect::<Option<Vec<_>>>()?;
+
+						(cur_idx, entry_idxs)
+					};
+
+					// Then choose which entry to remove
+					let to_remove_loaded_idx = match idxs {
+						// If we have all the indices, select the furthest one
+						Some((cur_idx, entry_idxs)) => entry_idxs
+							.iter()
+							.position_max_by_key(|entry_idx| entry_idx.abs_diff(cur_idx))
+							.expect("Just checked it wasn't empty"),
+
+						// If we don't have all the indices, there's a re-order
+						// happening right now, so we just conservatively remove
+						// the oldest item
+						// Note: The current entry cannot be the oldest because we
+						//       just inserted, so this is guaranteed to not be our
+						//       current entry
+						None => 0,
+					};
+
+					// Finally remove it from the loaded entries and remove it's texture
 					let entry = self
 						.loaded_entries
-						.shift_remove_index(0)
-						.expect("Just checked max wasn't empty");
+						.shift_remove_index(to_remove_loaded_idx)
+						.expect("Just checked it wasn't empty");
 					entry.remove_texture();
 				}
 

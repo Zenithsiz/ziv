@@ -184,6 +184,11 @@ impl DirReader {
 		self.inner.lock().entries.len()
 	}
 
+	/// Returns the index of an entry.
+	pub fn idx_of(&self, entry: &DirEntry) -> Result<Option<usize>, AppError> {
+		self.inner.lock().search(entry).map(Result::ok)
+	}
+
 	/// Reads a path into this directory reader.
 	///
 	/// Directories will be read, while files will have their parent read
