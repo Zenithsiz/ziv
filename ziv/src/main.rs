@@ -225,6 +225,7 @@ impl eframe::App for EguiApp {
 				let key = match kind {
 					SortOrderKind::FileName => egui::Key::F1,
 					SortOrderKind::ModificationDate => egui::Key::F2,
+					SortOrderKind::Size => egui::Key::F3,
 				};
 
 				(key, kind)
@@ -597,6 +598,7 @@ fn sort_order_name(sort_order: SortOrder) -> String {
 	let sort_order_kind = match sort_order.kind {
 		SortOrderKind::FileName => "File name",
 		SortOrderKind::ModificationDate => "Modified date",
+		SortOrderKind::Size => "Size",
 	};
 
 	match sort_order.reverse {

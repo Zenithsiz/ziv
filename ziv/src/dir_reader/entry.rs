@@ -146,6 +146,7 @@ impl DirEntry {
 			SortOrderKind::FileName => natord::compare(lhs.file_name.as_ref()?, rhs.file_name.as_ref()?),
 			SortOrderKind::ModificationDate =>
 				SystemTime::cmp(lhs.modified_date.as_ref()?, rhs.modified_date.as_ref()?),
+			SortOrderKind::Size => u64::cmp(lhs.size.as_ref()?, rhs.size.as_ref()?),
 		};
 
 		match order.reverse {
@@ -158,9 +159,10 @@ impl DirEntry {
 	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
 		let mut inner = self.0.lock();
 		match order.kind {
-			SortOrderKind::FileName => _ = inner.update_file_name().context("Unable to get file name")?,
+			SortOrderKind::FileName => _ = inner.update_file_name().context("Unable to update file name")?,
 			SortOrderKind::ModificationDate =>
-				_ = inner.update_modified_date().context("Unable to get modified date")?,
+				_ = inner.update_modified_date().context("Unable to update modified date")?,
+			SortOrderKind::Size => _ = inner.update_size().context("Unable to update size")?,
 		}
 		drop(inner);
 

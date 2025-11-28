@@ -8,11 +8,16 @@ pub struct SortOrder {
 
 impl SortOrder {
 	/// All kinds
-	pub const KINDS: [SortOrderKind; 2] = [SortOrderKind::FileName, SortOrderKind::ModificationDate];
+	pub const KINDS: [SortOrderKind; 3] = [
+		SortOrderKind::FileName,
+		SortOrderKind::ModificationDate,
+		SortOrderKind::Size,
+	];
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SortOrderKind {
 	FileName,
 	ModificationDate,
+	Size,
 }
