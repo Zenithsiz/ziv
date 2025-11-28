@@ -26,6 +26,7 @@ use {
 	},
 	app_error::Context,
 	clap::Parser,
+	egui::emath::GuiRounding,
 	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode},
 	zutil_logger::Logger,
 };
@@ -248,6 +249,9 @@ impl EguiApp {
 				(ui_pos, ui_size)
 			},
 		};
+
+		let ui_pos = ui_pos.round_ui();
+		let ui_size = ui_size.round_ui();
 
 		// After obtaining the ui position and size, adjust it using uvs
 		// Note: Since the uvs may be negative (corresponding to only showing part of
@@ -478,7 +482,7 @@ impl eframe::App for EguiApp {
 						.maintain_aspect_ratio(true)
 						.fit_to_exact_size(ui.available_size());
 
-					let window_size = ui.available_size();
+					let window_size = ui.available_size().round_ui();
 					let image_response =
 						Self::draw_image(ui, image, image_size, window_size, &mut self.image_zoom, self.view_mode);
 
@@ -509,12 +513,12 @@ impl eframe::App for EguiApp {
 					draw_output.image_size = Some(image_size);
 
 					let window_size = match self.resized_image {
-						true => ui.available_size(),
+						true => ui.available_size().round_ui(),
 						false => {
 							self.resized_image = true;
 
 							let monitor_size = ui.input(|input| input.viewport().monitor_size)?;
-							let image_size_monitor = image.calc_size(monitor_size, Some(image_size));
+							let image_size_monitor = image.calc_size(monitor_size, Some(image_size)).round_ui();
 
 
 							draw_output.resize_size = Some(image_size_monitor);
