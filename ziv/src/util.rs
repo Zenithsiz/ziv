@@ -80,7 +80,7 @@ pub impl egui::Rect {
 	/// Scales this rectangle from it's minimum position
 	fn scale_from_min2(&self, scale: egui::Vec2) -> Self {
 		self.translate(-self.min.to_vec2())
-			.div_vec2(scale)
+			.mul_vec2(scale)
 			.translate(self.min.to_vec2())
 	}
 }
