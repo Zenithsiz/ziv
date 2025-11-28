@@ -332,38 +332,38 @@ impl EguiApp {
 	}
 
 	/// Draws an entry
-	fn draw_entry(
-		&mut self,
-		ui: &mut egui::Ui,
-		entry: &CurEntry,
-		input: &DrawInput,
-		output: &mut DrawOutput,
-		window_response: &egui::Response,
-	) -> Option<egui::Response> {
-		let entry_path = entry.path();
+	fn draw_entry(&mut self, ui: &mut egui::Ui, input: DrawInput) -> DrawOutput {
+		let mut output = DrawOutput {
+			window_response:  None,
+			image_size:       None,
+			resize_size:      None,
+			remove_cur_entry: false,
+		};
+
+		let entry_path = input.entry.path();
 		match entry_path.extension().and_then(OsStr::to_str) {
 			Some("mkv" | "webm" | "gif") => {
 				let player = match &mut self.cur_player {
-					Some(player) if player.entry == *entry => player,
+					Some(player) if player.entry == *input.entry => player,
 					_ => {
 						let Some(path) = entry_path.to_str() else {
 							tracing::warn!("Non-utf8 video paths cannot be played currently");
 							output.remove_cur_entry = true;
-							return None;
+							return output;
 						};
 						match egui_video::Player::new(ui.ctx(), &path.to_owned()) {
 							Ok(mut player) => {
 								player.start();
 								output.resize_size = Some(player.size);
 								self.cur_player.insert(CurPlayer {
-									entry: entry.clone().into(),
+									entry: input.entry.clone().into(),
 									player,
 								})
 							},
 							Err(err) => {
 								tracing::warn!("{:?}", err.context("Unable to create video player"));
 								output.remove_cur_entry = true;
-								return None;
+								return output;
 							},
 						}
 					},
@@ -387,24 +387,22 @@ impl EguiApp {
 					.fit_to_exact_size(ui.available_size());
 
 				let window_size = ui.available_size().round_ui();
-				let image_response = Self::draw_image(
+				output.window_response = Some(Self::draw_image(
 					ui,
 					image,
 					image_size,
 					window_size,
 					&mut self.image_zoom,
 					self.view_mode,
-					window_response,
-				);
+					input.window_response,
+				));
 
-				player.player.render_controls(ui, window_response);
+				player.player.render_controls(ui, input.window_response);
 				player.player.process_state();
 
-				if !entry.has_image_details() {
-					entry.set_image_details(ImageDetails::Video {});
+				if !input.entry.has_image_details() {
+					input.entry.set_image_details(ImageDetails::Video {});
 				}
-
-				Some(image_response)
 			},
 
 			_ => {
@@ -417,7 +415,7 @@ impl EguiApp {
 						ui.weak("Loading...");
 					});
 
-					return None;
+					return output;
 				};
 
 				output.image_size = Some(image_size);
@@ -427,7 +425,9 @@ impl EguiApp {
 					false => {
 						self.resized_image = true;
 
-						let monitor_size = ui.input(|input| input.viewport().monitor_size)?;
+						let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size) else {
+							return output;
+						};
 						let image_size_monitor = image.calc_size(monitor_size, Some(image_size)).round_ui();
 
 
@@ -436,23 +436,23 @@ impl EguiApp {
 					},
 				};
 
-				let image_response = Self::draw_image(
+				output.window_response = Some(Self::draw_image(
 					ui,
 					image,
 					image_size,
 					window_size,
 					&mut self.image_zoom,
 					self.view_mode,
-					window_response,
-				);
+					input.window_response,
+				));
 
-				if !entry.has_image_details() {
-					entry.set_image_details(ImageDetails::Image { size: image_size });
+				if !input.entry.has_image_details() {
+					input.entry.set_image_details(ImageDetails::Image { size: image_size });
 				}
-
-				Some(image_response)
 			},
 		}
+
+		output
 	}
 }
 
@@ -549,21 +549,20 @@ impl eframe::App for EguiApp {
 
 		self.draw_info_window(ctx, &cur_entry);
 
-
-		let mut draw_output = DrawOutput {
-			image_size:       None,
-			resize_size:      None,
-			remove_cur_entry: false,
-		};
-		egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+		let panel_output = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 			let window_response = ui.interact(
 				egui::Rect::from_min_size(egui::Pos2::ZERO, ui.available_size()),
 				egui::Id::new("whole-screen"),
 				egui::Sense::all(),
 			);
 
-			let draw_input = DrawInput { toggle_pause };
-			let response = match self.draw_entry(ui, &cur_entry, &draw_input, &mut draw_output, &window_response) {
+			let draw_input = DrawInput {
+				toggle_pause,
+				entry: &cur_entry,
+				window_response: &window_response,
+			};
+			let mut draw_output = self.draw_entry(ui, draw_input);
+			let response = match draw_output.window_response.take() {
 				Some(response) => response.union(window_response),
 				None => window_response,
 			};
@@ -600,7 +599,10 @@ impl eframe::App for EguiApp {
 					}
 				});
 			});
+
+			draw_output
 		});
+		let draw_output = panel_output.inner;
 
 		if let Some(size) = draw_output.resize_size {
 			tracing::info!("Resizing to {}x{}", size.x, size.y);
@@ -658,11 +660,16 @@ macro write_str(
 	write!( $($t)* ).expect("Writing into strings cannot fail")
 }
 
-struct DrawInput {
-	toggle_pause: bool,
+#[derive(Clone, Copy, Debug)]
+struct DrawInput<'a> {
+	entry:           &'a CurEntry,
+	window_response: &'a egui::Response,
+	toggle_pause:    bool,
 }
 
+#[derive(Clone, Debug)]
 struct DrawOutput {
+	window_response:  Option<egui::Response>,
 	image_size:       Option<egui::Vec2>,
 	resize_size:      Option<egui::Vec2>,
 	remove_cur_entry: bool,
