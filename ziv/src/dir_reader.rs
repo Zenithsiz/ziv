@@ -17,7 +17,7 @@ use {
 	crate::util::AppError,
 	app_error::Context,
 	core::{mem, time::Duration},
-	eframe::egui::mutex::{Mutex, MutexGuard},
+	parking_lot::{Mutex, MutexGuard},
 	std::{
 		ffi::OsStr,
 		fs::{self},
@@ -49,7 +49,6 @@ use {
 /// order) and the entry itself.
 #[derive(derive_more::Debug)]
 pub struct DirReader {
-	#[debug(ignore)]
 	inner: Arc<Mutex<Inner>>,
 
 	_read_thread: thread::JoinHandle<()>,

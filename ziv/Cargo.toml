@@ -22,6 +22,7 @@ natord                = { workspace = true }
 notify                = { workspace = true }
 notify-debouncer-full = { workspace = true }
 opener                = { features = ["reveal"], workspace = true }
+parking_lot           = { workspace = true }
 serde                 = { features = ["derive", "unstable"], workspace = true }
 strum                 = { features = ["derive"], workspace = true }
 tracing               = { workspace = true }

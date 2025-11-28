@@ -5719,6 +5719,7 @@ dependencies = [
  "notify",
  "notify-debouncer-full",
  "opener",
+ "parking_lot",
  "serde",
  "strum",
  "tracing",

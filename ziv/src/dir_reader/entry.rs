@@ -6,7 +6,7 @@ use {
 	crate::util::{AppError, OptionGetOrTryInsert},
 	app_error::Context,
 	core::cmp::Ordering,
-	eframe::egui::mutex::Mutex,
+	parking_lot::Mutex,
 	std::{
 		fs::{self, Metadata},
 		path::PathBuf,
@@ -55,7 +55,7 @@ impl Inner {
 }
 
 #[derive(Clone, derive_more::Debug)]
-pub struct DirEntry(#[debug(ignore)] Arc<Mutex<Inner>>);
+pub struct DirEntry(Arc<Mutex<Inner>>);
 
 impl DirEntry {
 	/// Creates a new directory entry
