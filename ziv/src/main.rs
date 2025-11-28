@@ -199,6 +199,7 @@ impl EguiApp {
 		window_size: egui::Vec2,
 		image_zoom: &mut egui::Rect,
 		view_mode: ViewMode,
+		window_response: &egui::Response,
 	) -> egui::Response {
 		// If our zoom rectangle is uninitialized, initialize it
 		if *image_zoom == egui::Rect::ZERO {
@@ -266,19 +267,20 @@ impl EguiApp {
 		}
 
 		// Draw the image itself at our calculated ui with uvs.
-		let response = ui.allocate_rect(ui_rect, egui::Sense::all());
+		let image_response = ui.allocate_rect(ui_rect, egui::Sense::all());
 		image.uv(uv_rect).paint_at(ui, ui_rect);
 
 		// Handle panning
-		if response.dragged() {
+		if image_response.dragged() {
 			let scale = image_zoom.size() / ui_size;
-			*image_zoom = image_zoom.translate(-response.drag_delta() * scale);
+			*image_zoom = image_zoom.translate(-image_response.drag_delta() * scale);
 		}
 
 		// Handle zooming if the user is hovering
+		// Note: We want to zoom on both the background and the image, so we join them
 		let scroll_delta = ui.input(|input| input.smooth_scroll_delta.y);
 		if scroll_delta != 0.0 &&
-			let Some(cursor_pos) = response.hover_pos()
+			let Some(cursor_pos) = window_response.union(image_response.clone()).hover_pos()
 		{
 			let window_middle = egui::Pos2::ZERO + window_size / 2.0;
 			let zoom = 0.001 * scroll_delta * image_zoom.size();
@@ -326,7 +328,7 @@ impl EguiApp {
 
 		*image_zoom = image_zoom.translate(offset);
 
-		response
+		image_response
 	}
 }
 
@@ -433,8 +435,14 @@ impl eframe::App for EguiApp {
 			resize_size:      None,
 			remove_cur_entry: false,
 		};
-		let response = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
-			match cur_entry_path.extension().and_then(OsStr::to_str) {
+		egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+			let window_response = ui.interact(
+				egui::Rect::from_min_size(egui::Pos2::ZERO, ui.available_size()),
+				egui::Id::new("whole-screen"),
+				egui::Sense::all(),
+			);
+
+			let image_response = match cur_entry_path.extension().and_then(OsStr::to_str) {
 				Some("mkv" | "webm" | "gif") => {
 					let player = match &mut self.cur_player {
 						Some(player) if player.entry == cur_entry => player,
@@ -442,7 +450,7 @@ impl eframe::App for EguiApp {
 							let Some(path) = cur_entry_path.to_str() else {
 								tracing::warn!("Non-utf8 video paths cannot be played currently");
 								draw_output.remove_cur_entry = true;
-								return None;
+								return;
 							};
 							match egui_video::Player::new(ctx, &path.to_owned()) {
 								Ok(mut player) => {
@@ -456,7 +464,7 @@ impl eframe::App for EguiApp {
 								Err(err) => {
 									tracing::warn!("{:?}", err.context("Unable to create video player"));
 									draw_output.remove_cur_entry = true;
-									return None;
+									return;
 								},
 							}
 						},
@@ -480,9 +488,15 @@ impl eframe::App for EguiApp {
 						.fit_to_exact_size(ui.available_size());
 
 					let window_size = ui.available_size().round_ui();
-					let image_response =
-						Self::draw_image(ui, image, image_size, window_size, &mut self.image_zoom, self.view_mode);
-
+					let image_response = Self::draw_image(
+						ui,
+						image,
+						image_size,
+						window_size,
+						&mut self.image_zoom,
+						self.view_mode,
+						&window_response,
+					);
 
 					player.player.render_controls(ui, &image_response);
 					player.player.process_state();
@@ -491,7 +505,7 @@ impl eframe::App for EguiApp {
 						cur_entry.set_image_details(ImageDetails::Video {});
 					}
 
-					Some(image_response)
+					image_response
 				},
 
 				_ => {
@@ -504,7 +518,7 @@ impl eframe::App for EguiApp {
 							ui.weak("Loading...");
 						});
 
-						return None;
+						return;
 					};
 
 					draw_output.image_size = Some(image_size);
@@ -514,7 +528,9 @@ impl eframe::App for EguiApp {
 						false => {
 							self.resized_image = true;
 
-							let monitor_size = ui.input(|input| input.viewport().monitor_size)?;
+							let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size) else {
+								return;
+							};
 							let image_size_monitor = image.calc_size(monitor_size, Some(image_size)).round_ui();
 
 
@@ -523,20 +539,27 @@ impl eframe::App for EguiApp {
 						},
 					};
 
-					let response =
-						Self::draw_image(ui, image, image_size, window_size, &mut self.image_zoom, self.view_mode);
+					let image_response = Self::draw_image(
+						ui,
+						image,
+						image_size,
+						window_size,
+						&mut self.image_zoom,
+						self.view_mode,
+						&window_response,
+					);
 
 					if !cur_entry.has_image_details() {
 						cur_entry.set_image_details(ImageDetails::Image { size: image_size });
 					}
 
-					Some(response)
+					image_response
 				},
-			}
-		});
+			};
 
-		if let Some(response) = response.inner {
-			egui::Popup::context_menu(&response).show(|ui| {
+			// Merge the window response with the image so we catch events on both
+			let window_response = window_response.union(image_response);
+			egui::Popup::context_menu(&window_response).show(|ui| {
 				if ui.button("Open").clicked() &&
 					let Err(err) = opener::open(&*cur_entry_path)
 				{
@@ -567,7 +590,7 @@ impl eframe::App for EguiApp {
 					}
 				});
 			});
-		}
+		});
 
 		if let Some(size) = draw_output.resize_size {
 			tracing::info!("Resizing to {}x{}", size.x, size.y);
