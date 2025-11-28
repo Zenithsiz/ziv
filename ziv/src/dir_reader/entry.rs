@@ -3,38 +3,39 @@
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::{AppError, OptionGetOrTryInsert},
+	crate::util::AppError,
 	app_error::Context,
 	core::cmp::Ordering,
 	parking_lot::Mutex,
 	std::{
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
-		sync::Arc,
+		sync::{Arc, OnceLock},
 		time::SystemTime,
 	},
 };
 
 #[derive(Debug)]
 struct Inner {
-	path: Arc<Path>,
-
-	// TODO: Store the errors so we don't attempt to get some of these repeatedly
-	//       in cases where the user doesn't remove the entry on error?
+	path: Mutex<Arc<Path>>,
 
 	// TODO: Support non-utf-8 file names
-	file_name:     Option<String>,
-	metadata:      Option<Metadata>,
-	modified_date: Option<SystemTime>,
-	size:          Option<u64>,
-	image_details: Option<ImageDetails>,
+	file_name:     OnceLock<String>,
+	metadata:      OnceLock<Metadata>,
+	modified_date: OnceLock<SystemTime>,
+	size:          OnceLock<u64>,
+	image_details: Mutex<Option<ImageDetails>>,
 }
 
 impl Inner {
-	fn update_file_name(&mut self) -> Result<&mut String, AppError> {
-		self.file_name.get_or_try_insert_with(|| try {
-			self.path
-				.file_name()
+	fn path(&self) -> Arc<Path> {
+		Arc::clone(&self.path.lock())
+	}
+
+	fn update_file_name(&self) -> Result<&String, AppError> {
+		self.file_name.get_or_try_init(|| try {
+			let path = self.path();
+			path.file_name()
 				.context("Missing file name")?
 				.to_str()
 				.context("File name was non-utf8")?
@@ -42,110 +43,90 @@ impl Inner {
 		})
 	}
 
-	fn update_metadata(&mut self) -> Result<&mut Metadata, AppError> {
-		self.metadata
-			.get_or_try_insert_with(|| fs::metadata(&self.path).context("Unable to get metadata"))
+	fn update_metadata(&self) -> Result<&Metadata, AppError> {
+		self.metadata.get_or_try_init(|| {
+			let path = self.path();
+			fs::metadata(path).context("Unable to get metadata")
+		})
 	}
 
-	fn update_modified_date(&mut self) -> Result<&mut SystemTime, AppError> {
-		self.update_metadata().context("Unable to get metadata")?;
-
-		self.modified_date.get_or_try_insert_with(|| {
-			self.metadata
-				.as_ref()
-				.expect("Just initialized")
+	fn update_modified_date(&self) -> Result<&SystemTime, AppError> {
+		self.modified_date.get_or_try_init(|| {
+			self.update_metadata()
+				.context("Unable to get metadata")?
 				.modified()
 				.context("Unable to get system time")
 		})
 	}
 
-	fn update_size(&mut self) -> Result<&mut u64, AppError> {
-		self.update_metadata().context("Unable to get metadata")?;
-
-		self.size.get_or_try_insert_with(|| {
-			let metadata = self.metadata.as_ref().expect("Just initialized");
+	fn update_size(&self) -> Result<&u64, AppError> {
+		self.size.get_or_try_init(|| {
+			let metadata = self.update_metadata().context("Unable to get metadata")?;
 			Ok(metadata.len())
 		})
 	}
 }
 
 #[derive(Clone, derive_more::Debug)]
-pub struct DirEntry(Arc<Mutex<Inner>>);
+pub struct DirEntry(Arc<Inner>);
 
 impl DirEntry {
 	/// Creates a new directory entry
-	pub fn new(path: impl Into<Arc<Path>>) -> Self {
-		Self(Arc::new(Mutex::new(Inner {
-			path:          path.into(),
-			file_name:     None,
-			metadata:      None,
-			modified_date: None,
-			size:          None,
-			image_details: None,
-		})))
+	pub(super) fn new(path: impl Into<Arc<Path>>) -> Self {
+		Self(Arc::new(Inner {
+			path:          Mutex::new(path.into()),
+			file_name:     OnceLock::new(),
+			metadata:      OnceLock::new(),
+			modified_date: OnceLock::new(),
+			size:          OnceLock::new(),
+			image_details: Mutex::new(None),
+		}))
 	}
 
 	/// Returns this entry's path
 	pub fn path(&self) -> Arc<Path> {
-		Arc::clone(&self.0.lock().path)
+		self.0.path()
 	}
 
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
-		self.0.lock().path = path.into();
+		*self.0.path.lock() = path.into();
 	}
 
 	/// Sets the metadata of this entry
 	pub fn set_metadata(&self, metadata: fs::Metadata) {
-		self.0.lock().metadata = Some(metadata);
+		_ = self.0.metadata.set(metadata);
 	}
 
 	/// Returns the image details of this entry
 	pub fn image_details(&self) -> Option<ImageDetails> {
-		self.0.lock().image_details.clone()
+		self.0.image_details.lock().clone()
 	}
 
 	/// Returns if this entry contains image details
 	pub fn has_image_details(&self) -> bool {
-		self.0.lock().image_details.is_some()
+		self.0.image_details.lock().is_some()
 	}
 
 	/// Sets the image details of this entry
 	pub fn set_image_details(&self, image_details: ImageDetails) {
-		self.0.lock().image_details = Some(image_details);
+		*self.0.image_details.lock() = Some(image_details);
 	}
 
 	/// Returns this image's file size
 	pub fn size(&self) -> Result<u64, AppError> {
-		self.0.lock().update_size().copied()
+		// TODO: This can block, we should just try to get the field
+		//       and have the user load it elsewhere.
+		self.0.update_size().copied()
 	}
 
 	/// Compares two directory entries according to a sort order
 	pub fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
-		// TODO: This isn't foolproof unfortunately, we should do
-		//       something about it
-		let lhs_ptr = Arc::as_ptr(&self.0);
-		let rhs_ptr = Arc::as_ptr(&other.0);
-
-		let lhs;
-		let rhs;
-		match lhs_ptr.cmp(&rhs_ptr) {
-			Ordering::Less => {
-				lhs = self.0.lock();
-				rhs = other.0.lock();
-			},
-			Ordering::Greater => {
-				rhs = other.0.lock();
-				lhs = self.0.lock();
-			},
-			Ordering::Equal => return Some(Ordering::Equal),
-		}
-
 		let cmp = match order.kind {
-			SortOrderKind::FileName => natord::compare(lhs.file_name.as_ref()?, rhs.file_name.as_ref()?),
+			SortOrderKind::FileName => natord::compare(self.0.file_name.get()?, other.0.file_name.get()?),
 			SortOrderKind::ModificationDate =>
-				SystemTime::cmp(lhs.modified_date.as_ref()?, rhs.modified_date.as_ref()?),
-			SortOrderKind::Size => u64::cmp(lhs.size.as_ref()?, rhs.size.as_ref()?),
+				SystemTime::cmp(self.0.modified_date.get()?, other.0.modified_date.get()?),
+			SortOrderKind::Size => u64::cmp(self.0.size.get()?, other.0.size.get()?),
 		};
 
 		match order.reverse {
@@ -156,14 +137,15 @@ impl DirEntry {
 
 	/// Loads the necessary fields for `order`
 	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
-		let mut inner = self.0.lock();
 		match order.kind {
-			SortOrderKind::FileName => _ = inner.update_file_name().context("Unable to update file name")?,
+			SortOrderKind::FileName => _ = self.0.update_file_name().context("Unable to update file name")?,
 			SortOrderKind::ModificationDate =>
-				_ = inner.update_modified_date().context("Unable to update modified date")?,
-			SortOrderKind::Size => _ = inner.update_size().context("Unable to update size")?,
+				_ = self
+					.0
+					.update_modified_date()
+					.context("Unable to update modified date")?,
+			SortOrderKind::Size => _ = self.0.update_size().context("Unable to update size")?,
 		}
-		drop(inner);
 
 		Ok(())
 	}
