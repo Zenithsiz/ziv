@@ -61,7 +61,8 @@ pub struct DirReader {
 
 impl DirReader {
 	/// Creates a new directory reader
-	pub fn new(path: PathBuf) -> Self {
+	// TODO: Not need to drill the egui context through here?
+	pub fn new(path: PathBuf, egui_ctx: &egui::Context) -> Self {
 		let (load_thread_tx, load_thread_rx) = mpsc::channel();
 		let inner = Arc::new(Mutex::new(Inner {
 			sort_order: SortOrder {
@@ -91,9 +92,9 @@ impl DirReader {
 			tracing::warn!("Sorting thread returned");
 		});
 
-		#[cloned(inner)]
+		#[cloned(inner, egui_ctx)]
 		let load_thread = thread::spawn(move || {
-			Self::load_fields(&inner, &load_thread_rx);
+			Self::load_fields(&inner, &egui_ctx, &load_thread_rx);
 			tracing::warn!("Loader thread returned");
 		});
 
@@ -396,9 +397,16 @@ impl DirReader {
 	}
 
 	/// Loads fields on an entry
-	fn load_fields(inner: &Arc<Mutex<Inner>>, rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>) {
+	fn load_fields(
+		inner: &Arc<Mutex<Inner>>,
+		egui_ctx: &egui::Context,
+		rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>,
+	) {
 		while let Ok((entry, field)) = rx.recv() {
-			if let Err(err) = entry.load_field(field) {
+			// TODO: If we have a `[Texture, RemoveTexture]` fields to load, we
+			//       should probably skip it... somehow
+
+			if let Err(err) = entry.load_field(egui_ctx, field) {
 				let path = entry.path();
 				tracing::warn!("Unable to load entry {path:?} field {field:?}, removing: {err:?}");
 				inner.lock().remove(&path);

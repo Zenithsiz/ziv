@@ -107,7 +107,7 @@ impl EguiApp {
 	/// Creates a new app
 	pub fn new(cc: &eframe::CreationContext<'_>, path: PathBuf) -> Self {
 		egui_extras::install_image_loaders(&cc.egui_ctx);
-		let dir_reader = DirReader::new(path);
+		let dir_reader = DirReader::new(path, &cc.egui_ctx);
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
@@ -407,11 +407,34 @@ impl EguiApp {
 			},
 
 			_ => {
-				let Some(image_bytes) = input.entry.contents() else {
+				// Note: It's important we check the loaded textures *before*
+				//       returning, else we could accumulate a bunch of loading
+				//       textures
+				// Note: It's important we call `entry.texture` before
+				//       `entry.remove_texture`, otherwise the texture would be
+				//       "leaked" (as-in, it would be outside `loaded_entries`
+				//       while being loaded)
+				// TODO: We should probably remove the further one instead, since
+				//       otherwise we could be removing the very next one the user
+				//       requests.
+				let image_texture = input.entry.texture();
+				self.loaded_entries.insert(input.entry.clone().into());
+				if self.loaded_entries.len() > self.max_loaded_entries {
+					let entry = self
+						.loaded_entries
+						.shift_remove_index(0)
+						.expect("Just checked max wasn't empty");
+					entry.remove_texture();
+				}
+
+				let Some(image_texture) = image_texture else {
+					ui.centered_and_justified(|ui| {
+						ui.weak("Loading...");
+					});
 					return output;
 				};
 
-				let image = egui::Image::from_bytes(format!("file://{}", entry_path.display()), image_bytes)
+				let image = egui::Image::from_texture(egui::load::SizedTexture::from_handle(&image_texture))
 					.show_loading_spinner(false)
 					.sense(egui::Sense::click());
 
@@ -433,19 +456,6 @@ impl EguiApp {
 						return output;
 					},
 				};
-
-				// If we have too many loaded entries, remove the earliest one
-				// TODO: We should probably remove the further one instead, since
-				//       otherwise we could be removing the very next one the user
-				//       requests.
-				self.loaded_entries.insert(input.entry.clone().into());
-				if self.loaded_entries.len() > self.max_loaded_entries {
-					let entry = self
-						.loaded_entries
-						.shift_remove_index(0)
-						.expect("Just checked max wasn't empty");
-					entry.remove_contents();
-				}
 
 				output.image_size = Some(image_size);
 

@@ -15,7 +15,7 @@ use {
 	},
 };
 
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 struct Inner {
 	path: Mutex<Arc<Path>>,
 
@@ -30,9 +30,9 @@ struct Inner {
 	metadata:      OnceLock<Metadata>,
 	modified_date: OnceLock<SystemTime>,
 	size:          OnceLock<u64>,
-	// TODO: Unload the contents once the image is no longer on-screen
-	contents:      Mutex<Option<Arc<[u8]>>>,
-	// TODO: Also have a texture id stored here?
+	#[debug(ignore)]
+	texture:       Mutex<Option<egui::TextureHandle>>,
+	texture_load:  Mutex<()>,
 	image_details: Mutex<Option<ImageDetails>>,
 }
 
@@ -75,24 +75,41 @@ impl Inner {
 		})
 	}
 
-	fn load_contents(&self) -> Result<Arc<[u8]>, AppError> {
-		let mut contents = self.contents.lock();
-		match &*contents {
-			Some(contents) => Ok(Arc::clone(contents)),
+	fn load_texture(&self, egui_ctx: &egui::Context) -> Result<(), AppError> {
+		let _texture_load = self.texture_load.lock();
+		let mut texture = self.texture.lock();
+		match &*texture {
+			Some(_) => Ok(()),
 			None => {
-				// TODO: This conversion is expensive (copies all the data), what can we improve?
-				// TODO: If we had multiple loaders, this would be a race, since multiple threads
-				//       would read the contents, should we add another mutex for loading?
-				let new_contents = MutexGuard::unlocked(&mut contents, || {
+				let loaded_texture = MutexGuard::unlocked(&mut texture, || {
 					let path = self.path();
-					fs::read(path).map(Arc::from).context("Unable to read file")
-				})?;
-				*contents = Some(Arc::clone(&new_contents));
-				drop(contents);
+					let image = image::open(&path).context("Unable to read image")?;
 
-				Ok(new_contents)
+					let image = egui::ColorImage::from_rgba_unmultiplied(
+						[image.width() as usize, image.height() as usize],
+						&image.into_rgba8().into_flat_samples().samples,
+					);
+					let image = egui::ImageData::Color(Arc::new(image));
+
+					// TODO: This filter should be customizable.
+					let options = egui::TextureOptions::LINEAR;
+					// TODO: Could we make it so we don't require an egui context here?
+					let texture = egui_ctx.load_texture(path.display().to_string(), image, options);
+
+					Ok::<_, AppError>(texture)
+				})?;
+				*texture = Some(loaded_texture);
+				drop(texture);
+
+				Ok(())
 			},
 		}
+	}
+
+	fn remove_texture(&self) {
+		let _texture_load = self.texture_load.lock();
+		let mut texture = self.texture.lock();
+		*texture = None;
 	}
 }
 
@@ -109,7 +126,8 @@ impl DirEntry {
 			metadata: OnceLock::new(),
 			modified_date: OnceLock::new(),
 			size: OnceLock::new(),
-			contents: Mutex::new(None),
+			texture: Mutex::new(None),
+			texture_load: Mutex::new(()),
 			image_details: Mutex::new(None),
 		}))
 	}
@@ -151,18 +169,20 @@ impl DirEntry {
 		})
 	}
 
-	/// Returns this image's contents
-	pub fn contents(&self) -> Option<Arc<[u8]>> {
-		let contents = self.0.contents.lock().as_ref().map(Arc::clone);
+	/// Returns this image's texture
+	pub fn texture(&self) -> Option<egui::TextureHandle> {
+		let texture = self.0.texture.lock().as_ref().cloned();
 
-		contents.inspect_none(|| {
-			_ = self.0.loader_tx.send((self.clone(), EntryLoadField::Contents));
+		texture.inspect_none(|| {
+			_ = self.0.loader_tx.send((self.clone(), EntryLoadField::Texture));
 		})
 	}
 
-	/// Removes this image's contents
-	pub fn remove_contents(&self) {
-		*self.0.contents.lock() = None;
+	/// Removes this image's texture
+	pub fn remove_texture(&self) {
+		// Note: Even if it's `None` right now, we still need to send it to
+		//       the loader because there might be an ongoing loading.
+		_ = self.0.loader_tx.send((self.clone(), EntryLoadField::RemoveTexture));
 	}
 
 	/// Compares two directory entries according to a sort order
@@ -181,13 +201,14 @@ impl DirEntry {
 	}
 
 	/// Loads a field
-	pub(super) fn load_field(&self, field: EntryLoadField) -> Result<(), AppError> {
+	pub(super) fn load_field(&self, egui_ctx: &egui::Context, field: EntryLoadField) -> Result<(), AppError> {
 		match field {
 			EntryLoadField::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
 			EntryLoadField::Metadata => _ = self.0.load_metadata().context("Unable to load metadata")?,
 			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
 			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
-			EntryLoadField::Contents => _ = self.0.load_contents().context("Unable to load size")?,
+			EntryLoadField::Texture => self.0.load_texture(egui_ctx).context("Unable to load texture")?,
+			EntryLoadField::RemoveTexture => self.0.remove_texture(),
 		}
 
 		Ok(())
@@ -195,13 +216,14 @@ impl DirEntry {
 
 	/// Loads the necessary fields for `order`
 	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
-		let field = match order.kind {
-			SortOrderKind::FileName => EntryLoadField::FileName,
-			SortOrderKind::ModificationDate => EntryLoadField::ModifiedDate,
-			SortOrderKind::Size => EntryLoadField::Size,
-		};
+		match order.kind {
+			SortOrderKind::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
+			SortOrderKind::ModificationDate =>
+				_ = self.0.load_modified_date().context("Unable to load modified date")?,
+			SortOrderKind::Size => _ = self.0.load_size().context("Unable to load size")?,
+		}
 
-		self.load_field(field)
+		Ok(())
 	}
 }
 
@@ -228,11 +250,15 @@ pub enum ImageDetails {
 
 /// An entry's field to load
 #[derive(Clone, Copy, Debug)]
+#[expect(dead_code, reason = "Nothing needs them yet")]
 pub enum EntryLoadField {
 	FileName,
-	#[expect(dead_code, reason = "Nothing needs it yet")]
 	Metadata,
 	ModifiedDate,
 	Size,
-	Contents,
+	Texture,
+	// TODO: This isn't ideal, we should maybe just put
+	//       texture loading into it's own thread/thread-pool/task
+	//       that we can cancel instead of this.
+	RemoveTexture,
 }
