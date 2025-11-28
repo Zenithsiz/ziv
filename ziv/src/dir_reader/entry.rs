@@ -5,7 +5,7 @@ use {
 	super::{SortOrder, SortOrderKind},
 	crate::util::{AppError, OptionInspectNone},
 	app_error::Context,
-	core::{cmp::Ordering, hash::Hash},
+	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
 		fs::{self, Metadata},
@@ -245,7 +245,7 @@ impl Hash for DirEntry {
 #[derive(Clone, Debug)]
 pub enum ImageDetails {
 	Image { size: egui::Vec2 },
-	Video {},
+	Video { size: egui::Vec2, duration: Duration },
 }
 
 /// An entry's field to load

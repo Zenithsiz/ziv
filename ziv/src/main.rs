@@ -26,6 +26,7 @@ use {
 	},
 	app_error::Context,
 	clap::Parser,
+	core::time::Duration,
 	egui::emath::GuiRounding,
 	indexmap::IndexSet,
 	itertools::Itertools,
@@ -148,7 +149,9 @@ impl EguiApp {
 				ImageDetails::Image { size } => {
 					write_str!(title, " {}x{}", size.x, size.y);
 				},
-				ImageDetails::Video {} => (),
+				ImageDetails::Video { size, duration } => {
+					write_str!(title, " {}x{} ({duration:.2?})", size.x, size.y);
+				},
 			}
 		}
 
@@ -403,7 +406,18 @@ impl EguiApp {
 				player.player.process_state();
 
 				if !input.entry.has_image_details() {
-					input.entry.set_image_details(ImageDetails::Video {});
+					let duration_ms = match u64::try_from(player.player.duration_ms) {
+						Ok(duration) => duration,
+						Err(_) => {
+							tracing::warn!("Video duration was negative: {}ms", player.player.duration_ms);
+							0
+						},
+					};
+
+					input.entry.set_image_details(ImageDetails::Video {
+						size:     image_size,
+						duration: Duration::from_millis(duration_ms),
+					});
 				}
 			},
 
