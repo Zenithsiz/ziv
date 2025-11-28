@@ -638,17 +638,23 @@ pub struct SortProgress {
 	pub total:  usize,
 }
 
-// TODO: Impl deref into an entry.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, derive_more::Deref, derive_more::Into)]
 pub struct CurEntry {
-	pub entry: DirEntry,
-	pub idx:   Option<usize>,
+	#[deref]
+	#[into]
+	entry:   DirEntry,
+	pub idx: Option<usize>,
 }
 
-impl CurEntry {
-	/// Returns the path of this entry
-	pub fn path(&self) -> Arc<Path> {
-		self.entry.path()
+impl PartialEq<DirEntry> for CurEntry {
+	fn eq(&self, other: &DirEntry) -> bool {
+		&self.entry == other
+	}
+}
+
+impl PartialEq<CurEntry> for DirEntry {
+	fn eq(&self, other: &CurEntry) -> bool {
+		self == &other.entry
 	}
 }
 

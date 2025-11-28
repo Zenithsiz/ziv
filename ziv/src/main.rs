@@ -136,7 +136,7 @@ impl EguiApp {
 			cur_entry.path().file_name().expect("Entry had no file name").display()
 		);
 
-		if let Some(img) = cur_entry.entry.image_details() {
+		if let Some(img) = cur_entry.image_details() {
 			match img {
 				ImageDetails::Image { size } => {
 					write_str!(title, " {}x{}", size.x, size.y);
@@ -145,7 +145,7 @@ impl EguiApp {
 			}
 		}
 
-		match cur_entry.entry.size() {
+		match cur_entry.size() {
 			Ok(size) => {
 				write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
 			},
@@ -299,7 +299,7 @@ impl eframe::App for EguiApp {
 			match cur_entry_path.extension().and_then(OsStr::to_str) {
 				Some("mkv" | "webm" | "gif") => {
 					let player = match &mut self.cur_player {
-						Some(player) if player.entry == cur_entry.entry => player,
+						Some(player) if player.entry == cur_entry => player,
 						_ => {
 							let Some(path) = cur_entry_path.to_str() else {
 								tracing::warn!("Non-utf8 video paths cannot be played currently");
@@ -311,7 +311,7 @@ impl eframe::App for EguiApp {
 									player.start();
 									draw_output.resize_size = Some(player.size);
 									self.cur_player.insert(CurPlayer {
-										entry: cur_entry.entry.clone(),
+										entry: cur_entry.clone().into(),
 										player,
 									})
 								},
@@ -352,8 +352,8 @@ impl eframe::App for EguiApp {
 						})
 						.inner;
 
-					if !cur_entry.entry.has_image_details() {
-						cur_entry.entry.set_image_details(ImageDetails::Video {});
+					if !cur_entry.has_image_details() {
+						cur_entry.set_image_details(ImageDetails::Video {});
 					}
 
 					Some(response)
@@ -524,10 +524,8 @@ impl eframe::App for EguiApp {
 						self.image_zoom = self.image_zoom.translate(offset);
 					});
 
-					if !cur_entry.entry.has_image_details() {
-						cur_entry
-							.entry
-							.set_image_details(ImageDetails::Image { size: image_size });
+					if !cur_entry.has_image_details() {
+						cur_entry.set_image_details(ImageDetails::Image { size: image_size });
 					}
 
 					Some(response)
