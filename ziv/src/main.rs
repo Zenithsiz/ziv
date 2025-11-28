@@ -201,7 +201,7 @@ impl EguiApp {
 	) -> egui::Response {
 		// If our zoom rectangle is uninitialized, initialize it
 		if *image_zoom == egui::Rect::ZERO {
-			*image_zoom = egui::Rect::from_min_size(egui::Pos2::ZERO, image_size);
+			*image_zoom = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE);
 		}
 
 		let window_as = window_size.y / window_size.x;
