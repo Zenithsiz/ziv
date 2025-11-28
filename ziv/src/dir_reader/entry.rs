@@ -6,7 +6,6 @@ use {
 	crate::util::{AppError, OptionGetOrTryInsert},
 	app_error::Context,
 	core::cmp::Ordering,
-	eframe::egui,
 	parking_lot::Mutex,
 	std::{
 		fs::{self, Metadata},

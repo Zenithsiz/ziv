@@ -26,7 +26,6 @@ use {
 	},
 	app_error::Context,
 	clap::Parser,
-	eframe::egui::{self},
 	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode},
 	zutil_logger::Logger,
 };

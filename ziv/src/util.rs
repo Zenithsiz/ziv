@@ -4,7 +4,6 @@
 use {
 	app_error::Context,
 	core::cmp,
-	eframe::egui,
 	serde::de::DeserializeOwned,
 	std::{fs, path::Path},
 };
