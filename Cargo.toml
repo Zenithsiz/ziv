@@ -33,6 +33,7 @@ parking_lot           = "0.12.5"
 serde                 = "1.0.228"
 strum                 = "0.27.2"
 tracing               = "0.1.41"
+walkdir               = "2.5.0"
 zutil-cloned          = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
 zutil-logger          = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
 

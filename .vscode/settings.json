@@ -3,6 +3,7 @@
 		"eframe",
 		"egui",
 		"natord",
+		"walkdir",
 		"zutil"
 	]
 }

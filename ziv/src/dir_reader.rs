@@ -252,8 +252,8 @@ impl DirReader {
 			.watch(path, notify::RecursiveMode::NonRecursive)
 			.context("Unable to watch directory")?;
 
-		let dir_entries = fs::read_dir(path).context("Unable to read directory")?;
-		for entry in dir_entries {
+		let scan_dir = walkdir::WalkDir::new(path).min_depth(1).max_depth(1);
+		for entry in scan_dir {
 			let entry = entry.context("Unable to read entry")?;
 			let entry_path = entry.path();
 
@@ -264,7 +264,7 @@ impl DirReader {
 				return Ok(());
 			}
 
-			if let Err(err) = Self::read_dir_entry(inner, &entry_path, &entry) {
+			if let Err(err) = Self::read_dir_entry(inner, entry_path, &entry) {
 				tracing::warn!("Unable to read directory entry {:?}: {err:?}", entry.path());
 			}
 		}
@@ -281,9 +281,9 @@ impl DirReader {
 	fn read_dir_entry(
 		inner: &Arc<Mutex<Inner>>,
 		path: &Path,
-		entry: &fs::DirEntry,
+		entry: &walkdir::DirEntry,
 	) -> Result<Option<DirEntry>, AppError> {
-		let file_type = entry.file_type().context("Unable to get file type")?;
+		let file_type = entry.file_type();
 		Self::read_path_with_file_type(inner, path, MetadataOrFileType::FileType(file_type))
 	}
 

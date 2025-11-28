@@ -5723,6 +5723,7 @@ dependencies = [
  "serde",
  "strum",
  "tracing",
+ "walkdir",
  "zutil-cloned",
  "zutil-logger",
 ]
