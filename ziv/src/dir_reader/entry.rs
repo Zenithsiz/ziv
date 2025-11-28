@@ -78,6 +78,11 @@ impl DirEntry {
 		self.0.lock().path = path;
 	}
 
+	/// Sets the metadata of this entry
+	pub fn set_metadata(&self, metadata: fs::Metadata) {
+		self.0.lock().metadata = Some(metadata);
+	}
+
 	/// Compares two directory entries according to a sort order
 	pub fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
 		// TODO: This isn't foolproof unfortunately, we should do

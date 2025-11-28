@@ -284,21 +284,22 @@ impl DirReader {
 		path: &Path,
 		entry: &fs::DirEntry,
 	) -> Result<Option<DirEntry>, AppError> {
-		let metadata = entry.metadata().context("Unable to get metadata")?;
-		Self::read_path_with_metadata(inner, path, &metadata)
+		let file_type = entry.file_type().context("Unable to get file type")?;
+		Self::read_path_with_file_type(inner, path, MetadataOrFileType::FileType(file_type))
 	}
 
 	fn read_path(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
+		// TODO: Could we get away with only getting the file type in some scenarios?
 		let metadata = fs::metadata(path).context("Unable to get metadata")?;
-		Self::read_path_with_metadata(inner, path, &metadata)
+		Self::read_path_with_file_type(inner, path, MetadataOrFileType::Metadata(metadata))
 	}
 
-	fn read_path_with_metadata(
+	fn read_path_with_file_type(
 		inner: &Arc<Mutex<Inner>>,
 		path: &Path,
-		metadata: &fs::Metadata,
+		metadata: MetadataOrFileType,
 	) -> Result<Option<DirEntry>, AppError> {
-		if metadata.is_dir() {
+		if metadata.file_type().is_dir() {
 			tracing::info!("Ignoring directory: {path:?}");
 			return Ok(None);
 		}
@@ -312,8 +313,11 @@ impl DirReader {
 			return Ok(None);
 		}
 
-		// Create the entry
+		// Create the entry and add the metadata if we already have it
 		let entry = DirEntry::new(path.to_owned());
+		if let Some(metadata) = metadata.try_into_metadata() {
+			entry.set_metadata(metadata);
+		}
 
 		// Then search to where to insert it and insert it
 		let mut inner = inner.lock();
@@ -378,6 +382,29 @@ impl DirReader {
 			}
 
 			inner.sort_progress = None;
+		}
+	}
+}
+
+enum MetadataOrFileType {
+	Metadata(fs::Metadata),
+	FileType(fs::FileType),
+}
+
+impl MetadataOrFileType {
+	/// Returns the file type of this
+	pub fn file_type(&self) -> fs::FileType {
+		match self {
+			Self::Metadata(metadata) => metadata.file_type(),
+			Self::FileType(file_type) => *file_type,
+		}
+	}
+
+	/// Converts this into metadata, if available
+	pub const fn try_into_metadata(self) -> Option<fs::Metadata> {
+		match self {
+			Self::Metadata(metadata) => Some(metadata),
+			Self::FileType(_) => None,
 		}
 	}
 }
