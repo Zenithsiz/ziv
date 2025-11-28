@@ -146,7 +146,7 @@ impl DirEntry {
 	pub(super) fn load_field(&self, field: EntryLoadField) -> Result<(), AppError> {
 		match field {
 			EntryLoadField::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
-			EntryLoadField::Metadata => _ = self.0.load_file_name().context("Unable to load metadata")?,
+			EntryLoadField::Metadata => _ = self.0.load_metadata().context("Unable to load metadata")?,
 			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
 			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
 		}
