@@ -494,15 +494,16 @@ impl EguiApp {
 				let window_size = match self.resized_image {
 					true => ui.available_size().round_ui(),
 					false => {
-						self.resized_image = true;
-
 						let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size) else {
 							return output;
 						};
-						let image_size_monitor = image.calc_size(monitor_size, Some(image_size)).round_ui();
 
+						let scale = f32::min(monitor_size.x / image_size.x, monitor_size.y / image_size.y);
+						let image_size_monitor = (image_size * scale).round_ui();
 
 						output.resize_size = Some(image_size_monitor);
+						self.resized_image = true;
+
 						image_size_monitor
 					},
 				};
