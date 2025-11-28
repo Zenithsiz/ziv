@@ -5,8 +5,8 @@ use {
 	super::{SortOrder, SortOrderKind},
 	crate::util::{AppError, OptionInspectNone},
 	app_error::Context,
-	core::cmp::Ordering,
-	parking_lot::Mutex,
+	core::{cmp::Ordering, hash::Hash},
+	parking_lot::{Mutex, MutexGuard},
 	std::{
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
@@ -30,6 +30,9 @@ struct Inner {
 	metadata:      OnceLock<Metadata>,
 	modified_date: OnceLock<SystemTime>,
 	size:          OnceLock<u64>,
+	// TODO: Unload the contents once the image is no longer on-screen
+	contents:      Mutex<Option<Arc<[u8]>>>,
+	// TODO: Also have a texture id stored here?
 	image_details: Mutex<Option<ImageDetails>>,
 }
 
@@ -71,6 +74,26 @@ impl Inner {
 			Ok(metadata.len())
 		})
 	}
+
+	fn load_contents(&self) -> Result<Arc<[u8]>, AppError> {
+		let mut contents = self.contents.lock();
+		match &*contents {
+			Some(contents) => Ok(Arc::clone(contents)),
+			None => {
+				// TODO: This conversion is expensive (copies all the data), what can we improve?
+				// TODO: If we had multiple loaders, this would be a race, since multiple threads
+				//       would read the contents, should we add another mutex for loading?
+				let new_contents = MutexGuard::unlocked(&mut contents, || {
+					let path = self.path();
+					fs::read(path).map(Arc::from).context("Unable to read file")
+				})?;
+				*contents = Some(Arc::clone(&new_contents));
+				drop(contents);
+
+				Ok(new_contents)
+			},
+		}
+	}
 }
 
 #[derive(Clone, derive_more::Debug)]
@@ -85,6 +108,7 @@ impl DirEntry {
 			file_name: OnceLock::new(),
 			metadata: OnceLock::new(),
 			modified_date: OnceLock::new(),
+			contents: Mutex::new(None),
 			size: OnceLock::new(),
 			image_details: Mutex::new(None),
 		}))
@@ -127,6 +151,20 @@ impl DirEntry {
 		})
 	}
 
+	/// Returns this image's contents
+	pub fn contents(&self) -> Option<Arc<[u8]>> {
+		let contents = self.0.contents.lock().as_ref().map(Arc::clone);
+
+		contents.inspect_none(|| {
+			_ = self.0.loader_tx.send((self.clone(), EntryLoadField::Contents));
+		})
+	}
+
+	/// Removes this image's contents
+	pub fn remove_contents(&self) {
+		*self.0.contents.lock() = None;
+	}
+
 	/// Compares two directory entries according to a sort order
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
 		let cmp = match order.kind {
@@ -149,6 +187,7 @@ impl DirEntry {
 			EntryLoadField::Metadata => _ = self.0.load_metadata().context("Unable to load metadata")?,
 			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
 			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
+			EntryLoadField::Contents => _ = self.0.load_contents().context("Unable to load size")?,
 		}
 
 		Ok(())
@@ -174,6 +213,12 @@ impl PartialEq for DirEntry {
 
 impl Eq for DirEntry {}
 
+impl Hash for DirEntry {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		Arc::as_ptr(&self.0).hash(state);
+	}
+}
+
 /// Image details for an entry
 #[derive(Clone, Debug)]
 pub enum ImageDetails {
@@ -189,4 +234,5 @@ pub enum EntryLoadField {
 	Metadata,
 	ModifiedDate,
 	Size,
+	Contents,
 }

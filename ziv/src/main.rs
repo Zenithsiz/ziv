@@ -27,6 +27,7 @@ use {
 	app_error::Context,
 	clap::Parser,
 	egui::emath::GuiRounding,
+	indexmap::IndexSet,
 	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode},
 	zutil_logger::Logger,
 };
@@ -96,6 +97,10 @@ struct EguiApp {
 	image_zoom:     egui::Rect,
 	resized_image:  bool,
 	view_mode:      ViewMode,
+
+	/// Entries we're loaded
+	loaded_entries:     IndexSet<DirEntry>,
+	max_loaded_entries: usize,
 }
 
 impl EguiApp {
@@ -115,6 +120,8 @@ impl EguiApp {
 			image_zoom: egui::Rect::ZERO,
 			resized_image: false,
 			view_mode: ViewMode::FitWindow,
+			loaded_entries: IndexSet::new(),
+			max_loaded_entries: 5,
 		}
 	}
 
@@ -400,17 +407,45 @@ impl EguiApp {
 			},
 
 			_ => {
-				let image = egui::Image::from_uri(format!("file://{}", entry_path.display()))
+				let Some(image_bytes) = input.entry.contents() else {
+					return output;
+				};
+
+				let image = egui::Image::from_bytes(format!("file://{}", entry_path.display()), image_bytes)
 					.show_loading_spinner(false)
 					.sense(egui::Sense::click());
 
-				let Some(image_size) = image.load_and_calc_size(ui, egui::Vec2::INFINITY) else {
-					ui.centered_and_justified(|ui| {
-						ui.weak("Loading...");
-					});
-
-					return output;
+				let load_res = image.load_for_size(ui.ctx(), egui::Vec2::INFINITY);
+				let image_size = match load_res {
+					Ok(tex) => match tex.size() {
+						// TODO: We can have a size even while not loaded, should we still continue?
+						Some(size) => size,
+						None => {
+							ui.centered_and_justified(|ui| {
+								ui.weak("Loading...");
+							});
+							return output;
+						},
+					},
+					Err(err) => {
+						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
+						self.dir_reader.cur_entry_remove();
+						return output;
+					},
 				};
+
+				// If we have too many loaded entries, remove the earliest one
+				// TODO: We should probably remove the further one instead, since
+				//       otherwise we could be removing the very next one the user
+				//       requests.
+				self.loaded_entries.insert(input.entry.clone().into());
+				if self.loaded_entries.len() > self.max_loaded_entries {
+					let entry = self
+						.loaded_entries
+						.shift_remove_index(0)
+						.expect("Just checked max wasn't empty");
+					entry.remove_contents();
+				}
 
 				output.image_size = Some(image_size);
 

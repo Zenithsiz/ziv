@@ -4,6 +4,7 @@
 		"egui",
 		"emath",
 		"humansize",
+		"indexmap",
 		"natord",
 		"walkdir",
 		"zutil"
