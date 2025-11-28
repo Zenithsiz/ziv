@@ -444,20 +444,9 @@ impl eframe::App for EguiApp {
 						.div_vec2(ui_size);
 
 					if uv_rect.width() > 1.0 || uv_rect.height() > 1.0 {
-						ui_rect = ui_rect.scale_from_min2(uv_rect.size());
-						uv_rect = uv_rect.scale_from_min2(uv_rect.size());
-					}
-
-					if uv_rect.min.x < 0.0 || uv_rect.min.y < 0.0 {
-						let min_diff = uv_rect.min.to_vec2().min(egui::Vec2::ZERO);
-						ui_rect = ui_rect.translate(-min_diff * ui_size);
-						uv_rect = uv_rect.translate(-min_diff);
-					}
-
-					if uv_rect.max.x > 1.0 || uv_rect.max.y > 1.0 {
-						let max_diff = (egui::Vec2::ONE - uv_rect.max.to_vec2()).min(egui::Vec2::ZERO);
-						ui_rect = ui_rect.translate(max_diff * ui_size);
-						uv_rect = uv_rect.translate(max_diff);
+						let neg_uvs = -uv_rect.min.to_vec2();
+						ui_rect = ui_rect.translate(window_size * neg_uvs).div_vec2(uv_rect.size());
+						uv_rect = uv_rect.translate(neg_uvs).div_vec2(uv_rect.size());
 					}
 
 					let response = ui.allocate_rect(ui_rect, egui::Sense::all());
