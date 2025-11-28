@@ -124,6 +124,40 @@ impl EguiApp {
 		self.resized_image = false;
 	}
 
+	/// Formats the title
+	fn title(&self, cur_entry: &CurEntry) -> String {
+		let mut title = format!(
+			"{}/{}: {}",
+			std::fmt::from_fn(|f| match cur_entry.idx {
+				Some(idx) => write!(f, "{}", idx + 1),
+				None => write!(f, "?"),
+			}),
+			self.dir_reader.len(),
+			cur_entry.path().file_name().expect("Entry had no file name").display()
+		);
+
+		if let Some(img) = cur_entry.entry.image_details() {
+			match img {
+				ImageDetails::Image { size } => {
+					write_str!(title, " {}x{}", size.x, size.y);
+				},
+				ImageDetails::Video {} => (),
+			}
+		}
+
+		match cur_entry.entry.size() {
+			Ok(size) => {
+				write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
+			},
+			Err(err) => {
+				tracing::warn!("Unable to get entry size, removing {:?}: {err:?}", cur_entry.path());
+				self.dir_reader.cur_entry_remove();
+			},
+		}
+
+		title
+	}
+
 	/// Draws the info window
 	fn draw_info_window(&self, ctx: &egui::Context, cur_entry: &CurEntry) {
 		egui::Window::new("Path")
@@ -139,35 +173,7 @@ impl EguiApp {
 			.show(ctx, |ui| {
 				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
 
-				let mut info = format!(
-					"{}/{}: {}",
-					std::fmt::from_fn(|f| match cur_entry.idx {
-						Some(idx) => write!(f, "{}", idx + 1),
-						None => write!(f, "?"),
-					}),
-					self.dir_reader.len(),
-					cur_entry.path().file_name().expect("Entry had no file name").display()
-				);
-
-				if let Some(img) = cur_entry.entry.image_details() {
-					match img {
-						ImageDetails::Image { size } => {
-							write_str!(info, " {}x{}", size.x, size.y);
-						},
-						ImageDetails::Video {} => (),
-					}
-				}
-
-				match cur_entry.entry.size() {
-					Ok(size) => {
-						write_str!(info, " {}", humansize::format_size(size, humansize::BINARY));
-					},
-					Err(err) => {
-						tracing::warn!("Unable to get entry size, removing {:?}: {err:?}", cur_entry.path());
-						self.dir_reader.cur_entry_remove();
-					},
-				}
-
+				let mut info = self.title(cur_entry);
 				let view_mode = match self.view_mode {
 					ViewMode::FitWindow => "Fit window",
 					ViewMode::FitWidth => "Fit width",
@@ -580,21 +586,8 @@ impl eframe::App for EguiApp {
 			}
 		}
 
-		{
-			let mut title = format!(
-				"{}/{}: {}",
-				std::fmt::from_fn(|f| match cur_entry.idx {
-					Some(idx) => write!(f, "{}", idx + 1),
-					None => write!(f, "?"),
-				}),
-				self.dir_reader.len(),
-				cur_entry_path.file_name().expect("Entry had no file name").display()
-			);
-			if let Some(size) = draw_output.image_size {
-				write_str!(title, " {}x{}", size.x, size.y);
-			}
-			ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-		}
+		// TODO: Don't change the title each frame?
+		ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title(&cur_entry)));
 
 		if draw_output.remove_cur_entry {
 			self.dir_reader.cur_entry_remove();
