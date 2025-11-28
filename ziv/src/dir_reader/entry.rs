@@ -108,8 +108,8 @@ impl DirEntry {
 			file_name: OnceLock::new(),
 			metadata: OnceLock::new(),
 			modified_date: OnceLock::new(),
-			contents: Mutex::new(None),
 			size: OnceLock::new(),
+			contents: Mutex::new(None),
 			image_details: Mutex::new(None),
 		}))
 	}
