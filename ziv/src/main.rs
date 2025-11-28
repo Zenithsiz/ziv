@@ -397,7 +397,7 @@ impl EguiApp {
 					window_response,
 				);
 
-				player.player.render_controls(ui, &image_response);
+				player.player.render_controls(ui, window_response);
 				player.player.process_state();
 
 				if !entry.has_image_details() {
