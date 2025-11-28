@@ -178,7 +178,7 @@ impl EguiApp {
 				write_str!(info, "\nSort order: {}", self::sort_order_name(sort_order));
 
 				if let Some(sort_progress) = self.dir_reader.sort_progress() {
-					write_str!(info, "Sorting {}/{}", sort_progress.sorted, sort_progress.total);
+					write_str!(info, " Sorting {}/{}", sort_progress.sorted, sort_progress.total);
 				}
 
 				ui.label(info);
