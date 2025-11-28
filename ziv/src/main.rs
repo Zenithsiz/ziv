@@ -22,7 +22,7 @@ use {
 	self::{
 		args::Args,
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
-		util::{AppError, Pos2Utils, RectUtils},
+		util::{AppError, Pos2Utils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -256,16 +256,13 @@ impl EguiApp {
 		// After obtaining the ui position and size, adjust it using uvs
 		// Note: Since the uvs may be negative (corresponding to only showing part of
 		//       the texture on-screen), we need to move the ui position around.
-		let mut ui_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
-		let mut uv_rect = image_zoom
-			.mul_vec2(window_size)
-			.translate(-ui_pos.to_vec2())
-			.div_vec2(ui_size);
+		let mut ui_rect = egui::Rect::from_min_size(ui_pos, ui_size);
+		let mut uv_rect = *image_zoom;
 
-		if uv_rect.width() > 1.0 || uv_rect.height() > 1.0 {
-			let neg_uvs = -uv_rect.min.to_vec2();
-			ui_rect = ui_rect.translate(window_size * neg_uvs).div_vec2(uv_rect.size());
-			uv_rect = uv_rect.translate(neg_uvs).div_vec2(uv_rect.size());
+		if uv_rect.width() < 1.0 || uv_rect.height() < 1.0 {
+			let scale = egui::Vec2::ONE / uv_rect.size();
+			ui_rect = ui_rect.scale_from_center2(scale);
+			uv_rect = uv_rect.scale_from_center2(scale);
 		}
 
 		// Draw the image itself at our calculated ui with uvs.
@@ -274,7 +271,7 @@ impl EguiApp {
 
 		// Handle panning
 		if response.dragged() {
-			let scale = image_zoom.size() / window_size;
+			let scale = image_zoom.size() / ui_size;
 			*image_zoom = image_zoom.translate(-response.drag_delta() * scale);
 		}
 
@@ -285,7 +282,7 @@ impl EguiApp {
 		{
 			let window_middle = egui::Pos2::ZERO + window_size / 2.0;
 			let zoom = 0.001 * scroll_delta * image_zoom.size();
-			let offset = zoom * 2.0 * (cursor_pos - window_middle) / window_size;
+			let offset = zoom * 2.0 * (cursor_pos - window_middle) / ui_size;
 
 			*image_zoom = image_zoom.shrink2(zoom).translate(offset);
 		}
