@@ -64,22 +64,8 @@ impl Inner {
 		self.update_metadata().context("Unable to get metadata")?;
 
 		self.size.get_or_try_insert_with(|| {
-			#[cfg(any(unix, windows))]
 			let metadata = self.metadata.as_ref().expect("Just initialized");
-
-			#[cfg(unix)]
-			let size = std::os::unix::prelude::MetadataExt::size(metadata);
-
-			#[cfg(windows)]
-			let size = std::os::windows::prelude::MetadataExt::file_size(metadata);
-
-			#[cfg(not(any(unix, windows)))]
-			let size = {
-				let mut file = fs::File::open(&self.path).context("Unable to open file")?;
-				std::io::Seek::stream_len(&mut file).context("Unable to get file len")?
-			};
-
-			Ok(size)
+			Ok(metadata.len())
 		})
 	}
 }

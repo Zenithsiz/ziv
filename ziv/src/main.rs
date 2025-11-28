@@ -9,8 +9,7 @@
 	arbitrary_self_types,
 	iter_array_chunks,
 	exact_size_is_empty,
-	decl_macro,
-	seek_stream_len
+	decl_macro
 )]
 
 // Modules
