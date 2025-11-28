@@ -6,6 +6,7 @@ use {
 	crate::util::{AppError, OptionGetOrTryInsert},
 	app_error::Context,
 	core::cmp::Ordering,
+	eframe::egui,
 	parking_lot::Mutex,
 	std::{
 		fs::{self, Metadata},
@@ -22,6 +23,7 @@ struct Inner {
 	file_name:     Option<String>,
 	metadata:      Option<Metadata>,
 	modified_date: Option<SystemTime>,
+	image_details: Option<ImageDetails>,
 }
 
 impl Inner {
@@ -65,6 +67,7 @@ impl DirEntry {
 			file_name:     None,
 			metadata:      None,
 			modified_date: None,
+			image_details: None,
 		})))
 	}
 
@@ -81,6 +84,21 @@ impl DirEntry {
 	/// Sets the metadata of this entry
 	pub fn set_metadata(&self, metadata: fs::Metadata) {
 		self.0.lock().metadata = Some(metadata);
+	}
+
+	/// Returns the image details of this entry
+	pub fn image_details(&self) -> Option<ImageDetails> {
+		self.0.lock().image_details.clone()
+	}
+
+	/// Returns if this entry contains image details
+	pub fn has_image_details(&self) -> bool {
+		self.0.lock().image_details.is_some()
+	}
+
+	/// Sets the image details of this entry
+	pub fn set_image_details(&self, image_details: ImageDetails) {
+		self.0.lock().image_details = Some(image_details);
 	}
 
 	/// Compares two directory entries according to a sort order
@@ -137,3 +155,10 @@ impl PartialEq for DirEntry {
 }
 
 impl Eq for DirEntry {}
+
+/// Image details for an entry
+#[derive(Clone, Debug)]
+pub enum ImageDetails {
+	Image { size: egui::Vec2 },
+	Video {},
+}

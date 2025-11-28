@@ -8,7 +8,8 @@
 	try_blocks,
 	arbitrary_self_types,
 	iter_array_chunks,
-	exact_size_is_empty
+	exact_size_is_empty,
+	decl_macro
 )]
 
 // Modules
@@ -20,7 +21,7 @@ mod util;
 use {
 	self::{
 		args::Args,
-		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind},
+		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
 		util::{AppError, Pos2Utils, RectUtils},
 	},
 	app_error::Context,
@@ -137,7 +138,7 @@ impl EguiApp {
 			.show(ctx, |ui| {
 				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
 
-				ui.label(format!(
+				let mut info = format!(
 					"{}/{}: {}",
 					std::fmt::from_fn(|f| match cur_entry.idx {
 						Some(idx) => write!(f, "{}", idx + 1),
@@ -145,21 +146,32 @@ impl EguiApp {
 					}),
 					self.dir_reader.len(),
 					cur_entry.path().file_name().expect("Entry had no file name").display()
-				));
+				);
+
+				if let Some(img) = cur_entry.entry.image_details() {
+					match img {
+						ImageDetails::Image { size } => {
+							write_str!(info, " {}x{}", size.x, size.y);
+						},
+						ImageDetails::Video {} => (),
+					}
+				}
 
 				let view_mode = match self.view_mode {
 					ViewMode::FitWindow => "Fit window",
 					ViewMode::FitWidth => "Fit width",
 					ViewMode::ActualSize => "Actual size",
 				};
-				ui.label(format!("View mode: {view_mode}"));
+				write_str!(info, "\nView mode: {view_mode}");
 
 				let sort_order = self.dir_reader.sort_order();
-				ui.label(format!("Sort order: {}", self::sort_order_name(sort_order)));
+				write_str!(info, "\nSort order: {}", self::sort_order_name(sort_order));
 
 				if let Some(sort_progress) = self.dir_reader.sort_progress() {
-					ui.label(format!("Sorting {}/{}", sort_progress.sorted, sort_progress.total));
+					write_str!(info, "Sorting {}/{}", sort_progress.sorted, sort_progress.total);
 				}
+
+				ui.label(info);
 			});
 	}
 }
@@ -322,6 +334,10 @@ impl eframe::App for EguiApp {
 							frame_response
 						})
 						.inner;
+
+					if !cur_entry.entry.has_image_details() {
+						cur_entry.entry.set_image_details(ImageDetails::Video {});
+					}
 
 					Some(response)
 				},
@@ -491,6 +507,12 @@ impl eframe::App for EguiApp {
 						self.image_zoom = self.image_zoom.translate(offset);
 					});
 
+					if !cur_entry.entry.has_image_details() {
+						cur_entry
+							.entry
+							.set_image_details(ImageDetails::Image { size: image_size });
+					}
+
 					Some(response)
 				},
 			}
@@ -558,7 +580,7 @@ impl eframe::App for EguiApp {
 				cur_entry_path.file_name().expect("Entry had no file name").display()
 			);
 			if let Some(size) = draw_output.image_size {
-				write!(title, " {}x{}", size.x, size.y).expect("Writing to strings never fails");
+				write_str!(title, " {}x{}", size.x, size.y);
 			}
 			ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 		}
@@ -590,4 +612,10 @@ impl dir_reader::Visitor for DirReaderVisitor {
 	fn entry_added(&self, _dir_entry: DirEntry) {
 		self.ctx.request_repaint();
 	}
+}
+
+macro write_str(
+	$($t:tt)*
+) {
+	write!( $($t)* ).expect("Writing into strings cannot fail")
 }

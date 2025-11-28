@@ -638,6 +638,7 @@ pub struct SortProgress {
 	pub total:  usize,
 }
 
+// TODO: Impl deref into an entry.
 #[derive(Clone, Debug)]
 pub struct CurEntry {
 	pub entry: DirEntry,
