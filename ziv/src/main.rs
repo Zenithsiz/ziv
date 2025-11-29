@@ -137,14 +137,54 @@ impl EguiApp {
 		}
 	}
 
-	const fn reset_on_change_entry(&mut self) {
+	fn reset_on_change_entry(&mut self, new_entry: &CurEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
 			zoom:   0.0,
 		};
 		self.resized_image = false;
 
-		// TODO: Remove old images here instead?
+		if self.loaded_entries.len() > self.max_loaded_entries {
+			// Try to get the indices or all entries (including the new)
+			let idxs: Option<_> = try {
+				let new_idx = new_entry.idx?;
+
+				// TODO: Don't ignore errors here?
+				// TODO: This could be somewhat expensive, can we
+				//       cache this somehow?
+				let entry_idxs = self
+					.loaded_entries
+					.iter()
+					.map(|entry| self.dir_reader.idx_of(entry).ok().flatten())
+					.collect::<Option<Vec<_>>>()?;
+
+				(new_idx, entry_idxs)
+			};
+
+			// Then choose which entry to remove
+			let to_remove_loaded_idx = match idxs {
+				// If we have all the indices, select the furthest one
+				Some((new_idx, entry_idxs)) => entry_idxs
+					.iter()
+					.position_max_by_key(|entry_idx| entry_idx.abs_diff(new_idx))
+					.expect("Just checked it wasn't empty"),
+
+				// If we don't have all the indices, there's a re-order
+				// happening right now, so we just conservatively remove
+				// the oldest item
+				// Note: The current entry cannot be the oldest because we
+				//       just inserted, so this is guaranteed to not be our
+				//       current entry
+				None => 0,
+			};
+
+			// Finally remove it from the loaded entries and remove it's texture
+			let entry = self
+				.loaded_entries
+				.shift_remove_index(to_remove_loaded_idx)
+				.expect("Just checked it wasn't empty");
+			entry.remove_texture();
+		}
 	}
 
 	/// Formats the title
@@ -463,48 +503,6 @@ impl EguiApp {
 				//       while being loaded)
 				let image_texture = input.entry.texture();
 				self.loaded_entries.insert(input.entry.clone().into());
-				if self.loaded_entries.len() > self.max_loaded_entries {
-					// Try to get the indices or all entries (including the current)
-					let idxs: Option<_> = try {
-						let cur_idx = input.entry.idx?;
-
-						// TODO: Don't ignore errors here?
-						// TODO: This could be somewhat expensive, can we
-						//       cache this somehow?
-						let entry_idxs = self
-							.loaded_entries
-							.iter()
-							.map(|entry| self.dir_reader.idx_of(entry).ok().flatten())
-							.collect::<Option<Vec<_>>>()?;
-
-						(cur_idx, entry_idxs)
-					};
-
-					// Then choose which entry to remove
-					let to_remove_loaded_idx = match idxs {
-						// If we have all the indices, select the furthest one
-						Some((cur_idx, entry_idxs)) => entry_idxs
-							.iter()
-							.position_max_by_key(|entry_idx| entry_idx.abs_diff(cur_idx))
-							.expect("Just checked it wasn't empty"),
-
-						// If we don't have all the indices, there's a re-order
-						// happening right now, so we just conservatively remove
-						// the oldest item
-						// Note: The current entry cannot be the oldest because we
-						//       just inserted, so this is guaranteed to not be our
-						//       current entry
-						None => 0,
-					};
-
-					// Finally remove it from the loaded entries and remove it's texture
-					let entry = self
-						.loaded_entries
-						.shift_remove_index(to_remove_loaded_idx)
-						.expect("Just checked it wasn't empty");
-					entry.remove_texture();
-				}
-
 				let Some(image_texture) = image_texture else {
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
@@ -638,19 +636,19 @@ impl eframe::App for EguiApp {
 
 		if move_prev && let Some(entry) = self.dir_reader.cur_entry_set_prev() {
 			cur_entry = entry;
-			self.reset_on_change_entry();
+			self.reset_on_change_entry(&cur_entry);
 		}
 		if move_next && let Some(entry) = self.dir_reader.cur_entry_set_next() {
 			cur_entry = entry;
-			self.reset_on_change_entry();
+			self.reset_on_change_entry(&cur_entry);
 		}
 		if move_first && let Some(entry) = self.dir_reader.cur_entry_set_first() {
 			cur_entry = entry;
-			self.reset_on_change_entry();
+			self.reset_on_change_entry(&cur_entry);
 		}
 		if move_last && let Some(entry) = self.dir_reader.cur_entry_set_last() {
 			cur_entry = entry;
-			self.reset_on_change_entry();
+			self.reset_on_change_entry(&cur_entry);
 		}
 
 		let cur_entry = cur_entry;
