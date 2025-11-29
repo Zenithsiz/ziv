@@ -119,7 +119,7 @@ impl EguiApp {
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
-		dir_reader.add_allowed_extensions(["jpg", "jpeg", "png", "gif", "webp", "webm", "mkv"]);
+		dir_reader.add_allowed_extensions(["jpg", "jpeg", "png", "gif", "webp", "webm", "mkv", "mp4"]);
 
 		Self {
 			dir_reader,
@@ -354,7 +354,7 @@ impl EguiApp {
 
 		let entry_path = input.entry.path();
 		match entry_path.extension().and_then(OsStr::to_str) {
-			Some("mkv" | "webm" | "gif") => {
+			Some("mkv" | "mp4" | "webm" | "gif") => {
 				let player = match &mut self.cur_player {
 					Some(player) if player.entry == *input.entry => player,
 					_ => {
