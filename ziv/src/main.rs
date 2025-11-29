@@ -24,7 +24,7 @@ use {
 		args::Args,
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
 		shortcut::Shortcuts,
-		util::{AppError, Pos2Utils},
+		util::{AppError, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -101,7 +101,7 @@ struct EguiApp {
 	dir_reader:     DirReader,
 	cur_player:     Option<CurPlayer>,
 	next_frame_idx: usize,
-	image_zoom:     egui::Rect,
+	pan_zoom:       PanZoom,
 	resized_image:  bool,
 	view_mode:      ViewMode,
 	shortcuts:      Shortcuts,
@@ -125,7 +125,10 @@ impl EguiApp {
 			dir_reader,
 			cur_player: None,
 			next_frame_idx: 0,
-			image_zoom: egui::Rect::ZERO,
+			pan_zoom: PanZoom {
+				offset: egui::Vec2::ZERO,
+				zoom:   0.0,
+			},
 			resized_image: false,
 			view_mode: ViewMode::FitWindow,
 			loaded_entries: IndexSet::new(),
@@ -135,8 +138,13 @@ impl EguiApp {
 	}
 
 	const fn reset_on_change_entry(&mut self) {
-		self.image_zoom = egui::Rect::ZERO;
+		self.pan_zoom = PanZoom {
+			offset: egui::Vec2::ZERO,
+			zoom:   0.0,
+		};
 		self.resized_image = false;
+
+		// TODO: Remove old images here instead?
 	}
 
 	/// Formats the title
@@ -209,15 +217,10 @@ impl EguiApp {
 		image: egui::Image,
 		image_size: egui::Vec2,
 		window_size: egui::Vec2,
-		image_zoom: &mut egui::Rect,
+		pan_zoom: &mut PanZoom,
 		view_mode: ViewMode,
 		window_response: &egui::Response,
 	) -> egui::Response {
-		// If our zoom rectangle is uninitialized, initialize it
-		if *image_zoom == egui::Rect::ZERO {
-			*image_zoom = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE);
-		}
-
 		let window_as = window_size.y / window_size.x;
 		let image_as = image_size.y / image_size.x;
 
@@ -263,82 +266,104 @@ impl EguiApp {
 			},
 		};
 
-		let ui_pos = ui_pos.round_ui();
-		let ui_size = ui_size.round_ui();
-
-		// After obtaining the ui position and size, adjust it using uvs
-		// Note: Since the uvs may be negative (corresponding to only showing part of
-		//       the texture on-screen), we need to move the ui position around.
-		let mut ui_rect = egui::Rect::from_min_size(ui_pos, ui_size);
-		let mut uv_rect = *image_zoom;
-
-		if uv_rect.width() < 1.0 || uv_rect.height() < 1.0 {
-			let scale = egui::Vec2::ONE / uv_rect.size();
-			ui_rect = ui_rect.scale_from_center2(scale);
-			uv_rect = uv_rect.scale_from_center2(scale);
+		// Calculate our zoom, window/ui and uv scale
+		//
+		// # Zoom scale
+		// As the name implies, it's used to scale the uvs (and only them)
+		// to get to the part we're actually looking at
+		//
+		// # Window/Ui
+		// This is the relation between the window and the ui we emitted.
+		// Since we clamp it to a maximum of 1, this is only different from
+		// 1 when in fit-window mode in fullscreen, since the image won't cover
+		// up the entire screen.
+		// It's used to scale both the ui and uvs at the end to avoid having the
+		// ui be bigger than the actual window size. This is technically not
+		// necessary, since `egui` handles bigger-than-window widgets fine, but
+		// it makes the reasoning easier.
+		//
+		// # Uv
+		// This also relates to the fit-window mode, where we make the ui larger
+		// as long as there's still window space and the uvs aren't covering
+		// the whole image
+		// TODO: Choose cheaper functions than exponentials and logarithms?
+		fn zoom_to_scale(zoom: f32) -> f32 {
+			(-zoom / 500.0).exp()
 		}
+		fn scale_to_zoom(scale: f32) -> f32 {
+			-scale.ln() * 500.0
+		}
+		let mut zoom_scale = zoom_to_scale(pan_zoom.zoom);
 
-		// Draw the image itself at our calculated ui with uvs.
+		let window_ui_scale = (window_size / ui_size).min(egui::Vec2::ONE);
+		// Note: Mutable because we need to update it when zooming in later on
+		let mut uv_scale = (window_size / ui_size)
+			.min(egui::Vec2::ONE / zoom_scale)
+			.max(egui::Vec2::ONE);
+
+		// Afterwards calculate the ui and uv rects and draw our image on them
+		//
+		// # Ui
+		// The ui rect is the rectangle at which we'll position the image on screen.
+		// It will always be smaller or equal to window size.
+		//
+		// # UV
+		// The uv rect is the rectangle we use to crop the image (using uv coordinates,
+		// as the name implies). It will always be within `[0, 1] x [0, 1]`.
+		let ui_rect = egui::Rect::from_min_size(ui_pos, ui_size)
+			.scale_from_center2(uv_scale)
+			.scale_from_min2(window_ui_scale);
+		let uv_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE)
+			.translate(pan_zoom.offset / image_size)
+			.scale_from_center(zoom_scale)
+			.scale_from_center2(uv_scale)
+			.scale_from_min2(window_ui_scale);
+
 		let image_response = ui.allocate_rect(ui_rect, egui::Sense::all());
 		image.uv(uv_rect).paint_at(ui, ui_rect);
 
-		// Handle panning
+		// When dragging, handle panning
 		if image_response.dragged() {
-			let scale = image_zoom.size() / ui_size;
-			*image_zoom = image_zoom.translate(-image_response.drag_delta() * scale);
+			pan_zoom.offset -= image_response.drag_delta() * zoom_scale * image_size / ui_size;
 		}
 
-		// Handle zooming if the user is hovering
-		// Note: We want to zoom on both the background and the image, so we join them
+		// When hovering (either the image or background), handle zooming
 		let scroll_delta = ui.input(|input| input.smooth_scroll_delta.y);
 		if scroll_delta != 0.0 &&
 			let Some(cursor_pos) = window_response.union(image_response.clone()).hover_pos()
 		{
-			let window_middle = egui::Pos2::ZERO + window_size / 2.0;
-			let zoom = 0.001 * scroll_delta * image_zoom.size();
-			let offset = zoom * 2.0 * (cursor_pos - window_middle) / ui_size;
+			pan_zoom.zoom += scroll_delta;
 
-			*image_zoom = image_zoom.shrink2(zoom).translate(offset);
+			// Cap our zoom to not view outside the window
+			let max_zoom_scale = egui::Vec2::ONE / window_ui_scale;
+			let min_zoom = scale_to_zoom(max_zoom_scale.min_elem());
+			pan_zoom.zoom = pan_zoom.zoom.max(min_zoom);
+
+			// Then update the zoom scale and uv
+			let old_zoom_scale = zoom_scale;
+			zoom_scale = zoom_to_scale(pan_zoom.zoom);
+			uv_scale = (window_size / ui_size)
+				.min(egui::Vec2::ONE / zoom_scale)
+				.max(egui::Vec2::ONE);
+
+			// Note: When zooming in with modes other than fit-window, we'll
+			//       actually zoom into the middle of the image itself, so
+			//       we need to adjust it so we zoom correctly.
+			//       We also adjust the zoom so it zooms into where the cursor
+			//       is on screen for all view modes.
+			pan_zoom.offset += image_size *
+				(old_zoom_scale - zoom_scale) *
+				((window_ui_scale - egui::Vec2::ONE) / 2.0 + (cursor_pos.to_vec2() - window_size / 2.0) / ui_size);
 		}
 
-		// Normalize the image zoom to avoid infinite zoom out and panning out
-		// of the sides of the image.
-		if image_zoom.width() > 1.0 || image_zoom.height() > 1.0 {
-			let scale = egui::Vec2::ONE / image_zoom.size();
-			*image_zoom = image_zoom.scale_from_center2(scale);
-		}
+		// These minimum/maximum positions were calculated by setting `uv_rect.min >= 0.0` and
+		// `uv_rect.max <= 1.0` and solving for `pan_zoom.offset` in each one.
+		let min_pos = image_size * -(egui::Vec2::ONE - zoom_scale * uv_scale) / 2.0;
+		let max_pos = image_size *
+			((egui::Vec2::ONE - uv_scale * zoom_scale * window_ui_scale) -
+				(egui::Vec2::ONE - zoom_scale * uv_scale) / 2.0);
 
-		let mut offset = egui::Vec2::ZERO;
-
-		let min_pos = ui_pos.div_vec2(window_size);
-		if image_zoom.min.x < min_pos.x || image_zoom.min.y < min_pos.y {
-			offset += (min_pos - image_zoom.min).max(egui::Vec2::ZERO);
-		}
-
-		let max_pos = (ui_pos + ui_size).div_vec2(window_size);
-		if image_zoom.max.x > max_pos.x || image_zoom.max.y > max_pos.y {
-			offset += (max_pos - image_zoom.max).min(egui::Vec2::ZERO);
-		}
-
-		let width = image_zoom.width();
-		if min_pos.x + width >= max_pos.x {
-			offset.x = 0.0;
-
-			let pos = f32::midpoint(min_pos.x, max_pos.x);
-			image_zoom.min.x = pos - width / 2.0;
-			image_zoom.max.x = pos + width / 2.0;
-		}
-
-		let height = image_zoom.height();
-		if min_pos.y + height >= max_pos.y {
-			offset.y = 0.0;
-
-			let pos = f32::midpoint(min_pos.y, max_pos.y);
-			image_zoom.min.y = pos - height / 2.0;
-			image_zoom.max.y = pos + height / 2.0;
-		}
-
-		*image_zoom = image_zoom.translate(offset);
+		pan_zoom.offset = pan_zoom.offset.clamp(min_pos, max_pos);
 
 		image_response
 	}
@@ -404,7 +429,7 @@ impl EguiApp {
 					image,
 					image_size,
 					window_size,
-					&mut self.image_zoom,
+					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
 				));
@@ -534,7 +559,7 @@ impl EguiApp {
 					image,
 					image_size,
 					window_size,
-					&mut self.image_zoom,
+					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
 				));
@@ -595,7 +620,10 @@ impl eframe::App for EguiApp {
 			for (&view_mode, &key) in &self.shortcuts.view_modes {
 				if input.consume_key(egui::Modifiers::NONE, key) {
 					self.view_mode = view_mode;
-					self.image_zoom = egui::Rect::ZERO;
+					self.pan_zoom = PanZoom {
+						offset: egui::Vec2::ZERO,
+						zoom:   0.0,
+					};
 				}
 			}
 		});
@@ -758,4 +786,10 @@ struct DrawOutput {
 	image_size:       Option<egui::Vec2>,
 	resize_size:      Option<egui::Vec2>,
 	remove_cur_entry: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PanZoom {
+	offset: egui::Vec2,
+	zoom:   f32,
 }
