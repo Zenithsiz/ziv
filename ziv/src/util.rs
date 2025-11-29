@@ -49,12 +49,12 @@ pub impl<T> Option<T> {
 #[extend::ext(name = Pos2Utils)]
 pub impl egui::Pos2 {
 	/// Multiplies this point by a vector
-	fn mul_vec2(&self, v: egui::Vec2) -> Self {
+	fn mul_vec2(self, v: egui::Vec2) -> Self {
 		(self.to_vec2() * v).to_pos2()
 	}
 
 	/// Divides this point by a vector
-	fn div_vec2(&self, v: egui::Vec2) -> Self {
+	fn div_vec2(self, v: egui::Vec2) -> Self {
 		(self.to_vec2() / v).to_pos2()
 	}
 }
@@ -62,7 +62,7 @@ pub impl egui::Pos2 {
 #[extend::ext(name = RectUtils)]
 pub impl egui::Rect {
 	/// Multiplies both the min and maximum by a scale
-	fn mul_vec2(&self, v: egui::Vec2) -> Self {
+	fn mul_vec2(self, v: egui::Vec2) -> Self {
 		egui::Rect {
 			min: self.min.mul_vec2(v),
 			max: self.max.mul_vec2(v),
@@ -70,7 +70,7 @@ pub impl egui::Rect {
 	}
 
 	/// Divides both the min and maximum by a scale
-	fn div_vec2(&self, v: egui::Vec2) -> Self {
+	fn div_vec2(self, v: egui::Vec2) -> Self {
 		egui::Rect {
 			min: self.min.div_vec2(v),
 			max: self.max.div_vec2(v),
@@ -78,10 +78,14 @@ pub impl egui::Rect {
 	}
 
 	/// Scales this rectangle from it's minimum position
-	fn scale_from_min2(&self, scale: egui::Vec2) -> Self {
-		self.translate(-self.min.to_vec2())
-			.mul_vec2(scale)
-			.translate(self.min.to_vec2())
+	fn scale_from_min(self, scale: f32) -> Self {
+		self.scale_from_center2(egui::Vec2::splat(scale))
+	}
+
+	/// Scales this rectangle from it's minimum position
+	fn scale_from_min2(mut self, scale: egui::Vec2) -> Self {
+		self.max = self.min + self.size() * scale;
+		self
 	}
 }
 
