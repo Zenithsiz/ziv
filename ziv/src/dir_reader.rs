@@ -226,7 +226,13 @@ impl DirReader {
 		let mut begin_entry = None;
 		if !path_metadata.is_dir() {
 			let begin_entry_path = path.to_owned();
+
+			// Note: If `path` is just a filename, then it's parent will be empty,
+			//       but walkdir doesn't like empty paths, so we replace them with `.`.
 			path = path.parent().context("Path had no parent")?;
+			if path.is_empty() {
+				path = Path::new(".");
+			}
 
 			let entry = Self::read_path(inner, &begin_entry_path)
 				.context("Unable to read path")?
