@@ -237,6 +237,7 @@ impl DirReader {
 			let entry = Self::read_path(inner, &begin_entry_path)
 				.context("Unable to read path")?
 				.context("Specified path was not an image")?;
+			entry.set_metadata(path_metadata);
 			let entry = begin_entry.insert(entry);
 			inner.lock().cur_entry = Some(CurEntry {
 				entry: entry.clone(),
