@@ -393,17 +393,28 @@ impl EguiApp {
 		let image_response = ui.allocate_rect(ui_rect, egui::Sense::all());
 		image.uv(uv_rect).paint_at(ui, ui_rect);
 
-		// When dragging, handle panning
-		if image_response.dragged() {
-			pan_zoom.offset -= image_response.drag_delta() * zoom_scale * image_size / ui_size;
+		// When dragging or scrolling, handle panning
+		// Note: `translation_delta` uses both scrolling and pan gestures (on mobile, which don't include dragging,
+		//       for some reason, which is why we add it separately)
+		// TODO: Make this scroll sensitivity configurable
+		let drag_delta = image_response.drag_delta() + ui.input(egui::InputState::translation_delta) * 2.0;
+		if drag_delta != egui::Vec2::ZERO {
+			pan_zoom.offset -= drag_delta * zoom_scale * image_size / ui_size;
 		}
 
 		// When hovering (either the image or background), handle zooming
-		let scroll_delta = ui.input(|input| input.smooth_scroll_delta.y);
-		if scroll_delta != 0.0 &&
+		// TODO: Support 2d zoom?
+		let scroll_delta = ui.input(egui::InputState::zoom_delta);
+		#[expect(
+			clippy::float_cmp,
+			reason = "Egui sets it to exactly `1.0`, and either way this is just an optimization to avoid \
+			          re-calculating the zoom every frame"
+		)]
+		if scroll_delta != 1.0 &&
 			let Some(cursor_pos) = window_response.union(image_response.clone()).hover_pos()
 		{
-			pan_zoom.zoom += scroll_delta;
+			// TODO: Make this sensitivity configurable
+			pan_zoom.zoom += (scroll_delta - 1.0) * 200.0;
 
 			// Cap our zoom to not view outside the window
 			let max_zoom_scale = egui::Vec2::ONE / window_ui_scale;
