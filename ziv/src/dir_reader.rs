@@ -442,9 +442,6 @@ impl DirReader {
 			const fn priority(&self) -> usize {
 				// TODO: Give priority to the current entry somehow?
 				match self.field {
-					// Getting filenames doesn't block, so we prioritize those first
-					EntryLoadField::FileName => 3,
-
 					// These are all about as important
 					EntryLoadField::Metadata | EntryLoadField::ModifiedDate | EntryLoadField::Size => 1,
 				}

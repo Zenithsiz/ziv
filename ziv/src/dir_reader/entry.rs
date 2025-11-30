@@ -48,7 +48,7 @@ impl Inner {
 		Arc::clone(&self.path.lock())
 	}
 
-	fn load_file_name(&self) -> Result<&String, AppError> {
+	fn file_name(&self) -> Result<&String, AppError> {
 		self.file_name.get_or_try_init(|| try {
 			let path = self.path();
 			path.file_name()
@@ -189,6 +189,12 @@ impl DirEntry {
 		self.0.path()
 	}
 
+	/// Returns this entry's file name
+	pub fn file_name(&self) -> Result<String, AppError> {
+		// TODO: Store an `Arc<str>` to avoid cloning the string?
+		self.0.file_name().cloned()
+	}
+
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
 		*self.0.path.lock() = path.into();
@@ -273,7 +279,6 @@ impl DirEntry {
 	/// Loads a field
 	pub(super) fn load_field(&self, field: EntryLoadField) -> Result<(), AppError> {
 		match field {
-			EntryLoadField::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
 			EntryLoadField::Metadata => _ = self.0.load_metadata().context("Unable to load metadata")?,
 			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
 			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
@@ -285,7 +290,7 @@ impl DirEntry {
 	/// Loads the necessary fields for `order`
 	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
 		match order.kind {
-			SortOrderKind::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
+			SortOrderKind::FileName => _ = self.file_name().context("Unable to load file name")?,
 			SortOrderKind::ModificationDate =>
 				_ = self.0.load_modified_date().context("Unable to load modified date")?,
 			SortOrderKind::Size => _ = self.0.load_size().context("Unable to load size")?,
@@ -320,7 +325,6 @@ pub enum ImageDetails {
 #[derive(Clone, Copy, Debug)]
 #[expect(dead_code, reason = "Nothing needs them yet")]
 pub enum EntryLoadField {
-	FileName,
 	Metadata,
 	ModifiedDate,
 	Size,
