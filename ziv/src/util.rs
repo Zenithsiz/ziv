@@ -1,5 +1,11 @@
 //! Utilities
 
+// Modules
+mod loadable;
+
+// Exports
+pub use loadable::Loadable;
+
 // Imports
 use {
 	app_error::Context,

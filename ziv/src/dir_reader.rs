@@ -15,7 +15,7 @@ pub use self::{
 // Imports
 use {
 	self::entry::EntryLoadField,
-	crate::{dirs::Dirs, util::AppError},
+	crate::util::AppError,
 	app_error::Context,
 	core::{mem, ops::IntoBounds, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
@@ -63,7 +63,7 @@ pub struct DirReader {
 impl DirReader {
 	/// Creates a new directory reader
 	// TODO: Not need to drill the egui context through here?
-	pub fn new(path: PathBuf, egui_ctx: &egui::Context, dirs: &Arc<Dirs>) -> Self {
+	pub fn new(path: PathBuf) -> Self {
 		let (load_thread_tx, load_thread_rx) = mpsc::channel();
 		let inner = Arc::new(Mutex::new(Inner {
 			sort_order: SortOrder {
@@ -93,9 +93,9 @@ impl DirReader {
 			tracing::warn!("Sorting thread returned");
 		});
 
-		#[cloned(inner, egui_ctx, dirs)]
+		#[cloned(inner)]
 		let load_thread = thread::spawn(move || {
-			Self::load_fields(&inner, &egui_ctx, &dirs, &load_thread_rx);
+			Self::load_fields(&inner, &load_thread_rx);
 			tracing::warn!("Loader thread returned");
 		});
 
@@ -432,12 +432,7 @@ impl DirReader {
 	}
 
 	/// Loads fields on an entry
-	fn load_fields(
-		inner: &Arc<Mutex<Inner>>,
-		egui_ctx: &egui::Context,
-		dirs: &Dirs,
-		rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>,
-	) {
+	fn load_fields(inner: &Arc<Mutex<Inner>>, rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>) {
 		struct PriorityField {
 			entry: DirEntry,
 			field: EntryLoadField,
@@ -450,21 +445,8 @@ impl DirReader {
 					// Getting filenames doesn't block, so we prioritize those first
 					EntryLoadField::FileName => 3,
 
-					// After that, actually showing the images is the next most important
-					// thing, so we do that next
-					EntryLoadField::Texture => 2,
-
 					// These are all about as important
-					EntryLoadField::Metadata |
-					EntryLoadField::ModifiedDate |
-					EntryLoadField::Size |
-					EntryLoadField::ThumbnailTexture => 1,
-
-					// Finally, removal is the least important, so leave those for last.
-					// TODO: Doing this could lead to us running out of resources, but we also
-					//       can't make them too high, or else we risk removing before adding,
-					//       and thus "leaking" the texture. Ideally we'd just remove this.
-					EntryLoadField::RemoveTexture | EntryLoadField::RemoveThumbnailTexture => 0,
+					EntryLoadField::Metadata | EntryLoadField::ModifiedDate | EntryLoadField::Size => 1,
 				}
 			}
 		}
@@ -501,7 +483,7 @@ impl DirReader {
 			};
 
 			// Then load the field
-			if let Err(err) = entry.load_field(egui_ctx, dirs, field) {
+			if let Err(err) = entry.load_field(field) {
 				let path = entry.path();
 				tracing::warn!("Unable to load entry {path:?} field {field:?}, removing: {err:?}");
 				inner.lock().remove(&path);

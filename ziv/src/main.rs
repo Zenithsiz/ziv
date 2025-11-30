@@ -80,7 +80,7 @@ fn run() -> Result<(), AppError> {
 		"ziv",
 		native_options,
 		Box::new(|cc| {
-			let app = EguiApp::new(cc, &dirs, path);
+			let app = EguiApp::new(cc, dirs, path);
 			Ok(Box::new(app))
 		}),
 	)
@@ -124,6 +124,7 @@ impl DisplayMode {
 
 #[derive(Debug)]
 struct EguiApp {
+	dirs:           Arc<Dirs>,
 	dir_reader:     DirReader,
 	cur_player:     Option<CurPlayer>,
 	next_frame_idx: usize,
@@ -140,15 +141,16 @@ struct EguiApp {
 
 impl EguiApp {
 	/// Creates a new app
-	pub fn new(cc: &eframe::CreationContext<'_>, dirs: &Arc<Dirs>, path: PathBuf) -> Self {
+	pub fn new(cc: &eframe::CreationContext<'_>, dirs: Arc<Dirs>, path: PathBuf) -> Self {
 		egui_extras::install_image_loaders(&cc.egui_ctx);
-		let dir_reader = DirReader::new(path, &cc.egui_ctx, dirs);
+		let dir_reader = DirReader::new(path);
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
 		dir_reader.add_allowed_extensions(["jpg", "jpeg", "png", "gif", "webp", "webm", "mkv", "mp4"]);
 
 		Self {
+			dirs,
 			dir_reader,
 			cur_player: None,
 			next_frame_idx: 0,
@@ -543,7 +545,15 @@ impl EguiApp {
 				//       `entry.remove_texture`, otherwise the texture would be
 				//       "leaked" (as-in, it would be outside `loaded_entries`
 				//       while being loaded)
-				let image_texture = input.entry.texture();
+				let image_texture = match input.entry.texture(ui.ctx()) {
+					Ok(texture) => texture,
+					Err(err) => {
+						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
+						self.dir_reader.cur_entry_remove();
+						return output;
+					},
+				};
+
 				self.loaded_entries.insert(input.entry.clone().into());
 				let Some(image_texture) = image_texture else {
 					ui.centered_and_justified(|ui| {
@@ -778,11 +788,22 @@ impl EguiApp {
 										frame.show(ui, |ui| {
 											ui.take_available_width();
 
-											let Some(image_texture) = entry.thumbnail_texture() else {
-												ui.centered_and_justified(|ui| {
-													ui.weak("Loading...");
-												});
-												return;
+											let image_texture = match entry.thumbnail_texture(ui.ctx(), &self.dirs) {
+												Ok(Some(texture)) => texture,
+												Ok(None) => {
+													ui.centered_and_justified(|ui| {
+														ui.weak("Loading...");
+													});
+													return;
+												},
+												Err(err) => {
+													tracing::warn!(
+														"Unable to load image {:?}, removing: {err:?}",
+														entry.path()
+													);
+													self.dir_reader.cur_entry_remove();
+													return;
+												},
 											};
 
 											let image = egui::Image::from_texture(
