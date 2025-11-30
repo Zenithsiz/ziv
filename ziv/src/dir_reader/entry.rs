@@ -7,7 +7,7 @@ use {
 		dirs::Dirs,
 		util::{AppError, OptionInspectNone},
 	},
-	app_error::Context,
+	app_error::{Context, app_error},
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
@@ -16,6 +16,7 @@ use {
 		sync::{Arc, OnceLock, mpsc},
 		time::SystemTime,
 	},
+	url::Url,
 };
 
 #[derive(derive_more::Debug)]
@@ -29,14 +30,17 @@ struct Inner {
 	//       in cases where the user doesn't remove the entry on error?
 
 	// TODO: Support non-utf-8 file names
-	file_name:     OnceLock<String>,
-	metadata:      OnceLock<Metadata>,
-	modified_date: OnceLock<SystemTime>,
-	size:          OnceLock<u64>,
+	file_name:              OnceLock<String>,
+	metadata:               OnceLock<Metadata>,
+	modified_date:          OnceLock<SystemTime>,
+	size:                   OnceLock<u64>,
 	#[debug(ignore)]
-	texture:       Mutex<Option<egui::TextureHandle>>,
-	texture_load:  Mutex<()>,
-	image_details: Mutex<Option<ImageDetails>>,
+	texture:                Mutex<Option<egui::TextureHandle>>,
+	texture_load:           Mutex<()>,
+	#[debug(ignore)]
+	thumbnail_texture:      Mutex<Option<egui::TextureHandle>>,
+	thumbnail_texture_load: Mutex<()>,
+	image_details:          Mutex<Option<ImageDetails>>,
 }
 
 impl Inner {
@@ -78,7 +82,7 @@ impl Inner {
 		})
 	}
 
-	fn load_texture(&self, egui_ctx: &egui::Context, _dirs: &Dirs) -> Result<(), AppError> {
+	fn load_texture(&self, egui_ctx: &egui::Context) -> Result<(), AppError> {
 		let _texture_load = self.texture_load.lock();
 		let mut texture = self.texture.lock();
 		match &*texture {
@@ -114,6 +118,68 @@ impl Inner {
 		let mut texture = self.texture.lock();
 		*texture = None;
 	}
+
+	fn load_thumbnail_texture(&self, egui_ctx: &egui::Context, dirs: &Dirs) -> Result<(), AppError> {
+		let _texture_load = self.thumbnail_texture_load.lock();
+		let mut texture = self.thumbnail_texture.lock();
+		match &*texture {
+			Some(_) => Ok(()),
+			None => {
+				let loaded_texture = MutexGuard::unlocked(&mut texture, || {
+					let path = self.path();
+					let cache_path = {
+						let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
+						let path_uri = Url::from_file_path(&path_absolute)
+							.map_err(|()| app_error!("Unable to turn path into url: {path_absolute:?}"))?;
+						let path_md5 = md5::compute(path_uri.as_str());
+						let thumbnail_file_name = format!("{path_md5:#x}.png");
+
+						// TODO: Should we be using `png`s for the thumbnails?
+						dirs.thumbnails().join(thumbnail_file_name)
+					};
+
+					let image = match image::open(&cache_path) {
+						Ok(image) => image,
+						Err(err) => {
+							tracing::debug!(?path, ?cache_path, ?err, "No thumbnail found, generating one");
+							let image = image::open(&path).context("Unable to read image")?;
+							let image = image.thumbnail(256, 256);
+
+							// TODO: Make saving the thumbnail a non-fatal error
+							fs::create_dir_all(dirs.thumbnails()).context("Unable to create thumbnails directory")?;
+							image.save(cache_path).context("Unable to save thumbnail")?;
+
+							image
+						},
+					};
+
+
+					let image = egui::ColorImage::from_rgba_unmultiplied(
+						[image.width() as usize, image.height() as usize],
+						&image.into_rgba8().into_flat_samples().samples,
+					);
+					let image = egui::ImageData::Color(Arc::new(image));
+
+					// TODO: This filter should be customizable.
+					let options = egui::TextureOptions::LINEAR;
+					// TODO: Could we make it so we don't require an egui context here?
+					let texture = egui_ctx.load_texture(path.display().to_string(), image, options);
+
+					Ok::<_, AppError>(texture)
+				})?;
+				*texture = Some(loaded_texture);
+				drop(texture);
+
+				Ok(())
+			},
+		}
+	}
+
+	fn remove_thumbnail_texture(&self) {
+		let _texture_load = self.thumbnail_texture_load.lock();
+		let mut texture = self.thumbnail_texture.lock();
+		*texture = None;
+	}
 }
 
 #[derive(Clone, derive_more::Debug)]
@@ -131,6 +197,8 @@ impl DirEntry {
 			size: OnceLock::new(),
 			texture: Mutex::new(None),
 			texture_load: Mutex::new(()),
+			thumbnail_texture: Mutex::new(None),
+			thumbnail_texture_load: Mutex::new(()),
 			image_details: Mutex::new(None),
 		}))
 	}
@@ -188,6 +256,25 @@ impl DirEntry {
 		_ = self.0.loader_tx.send((self.clone(), EntryLoadField::RemoveTexture));
 	}
 
+	/// Returns this image's thumbnail texture
+	pub fn thumbnail_texture(&self) -> Option<egui::TextureHandle> {
+		let thumbnail_texture = self.0.thumbnail_texture.lock().as_ref().cloned();
+
+		thumbnail_texture.inspect_none(|| {
+			_ = self.0.loader_tx.send((self.clone(), EntryLoadField::ThumbnailTexture));
+		})
+	}
+
+	/// Removes this image's thumbnail texture
+	pub fn _remove_thumbnail_texture(&self) {
+		// Note: Even if it's `None` right now, we still need to send it to
+		//       the loader because there might be an ongoing loading.
+		_ = self
+			.0
+			.loader_tx
+			.send((self.clone(), EntryLoadField::RemoveThumbnailTexture));
+	}
+
 	/// Compares two directory entries according to a sort order
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Option<Ordering> {
 		let cmp = match order.kind {
@@ -215,8 +302,13 @@ impl DirEntry {
 			EntryLoadField::Metadata => _ = self.0.load_metadata().context("Unable to load metadata")?,
 			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
 			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
-			EntryLoadField::Texture => self.0.load_texture(egui_ctx, dirs).context("Unable to load texture")?,
+			EntryLoadField::Texture => self.0.load_texture(egui_ctx).context("Unable to load texture")?,
+			EntryLoadField::ThumbnailTexture => self
+				.0
+				.load_thumbnail_texture(egui_ctx, dirs)
+				.context("Unable to load thumbnail texture")?,
 			EntryLoadField::RemoveTexture => self.0.remove_texture(),
+			EntryLoadField::RemoveThumbnailTexture => self.0.remove_thumbnail_texture(),
 		}
 
 		Ok(())
@@ -265,8 +357,10 @@ pub enum EntryLoadField {
 	ModifiedDate,
 	Size,
 	Texture,
-	// TODO: This isn't ideal, we should maybe just put
+	ThumbnailTexture,
+	// TODO: These aren't ideal, we should maybe just put
 	//       texture loading into it's own thread/thread-pool/task
 	//       that we can cancel instead of this.
 	RemoveTexture,
+	RemoveThumbnailTexture,
 }

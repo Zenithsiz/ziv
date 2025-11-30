@@ -9,7 +9,8 @@
 	arbitrary_self_types,
 	iter_array_chunks,
 	exact_size_is_empty,
-	decl_macro
+	decl_macro,
+	range_into_bounds
 )]
 
 // Modules
@@ -103,6 +104,23 @@ enum ViewMode {
 	ActualSize,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(strum::VariantArray)]
+#[derive(serde::Serialize, serde::Deserialize)]
+enum DisplayMode {
+	Image,
+	List,
+}
+impl DisplayMode {
+	/// Returns the other variant of this display
+	const fn toggle(self) -> Self {
+		match self {
+			Self::Image => Self::List,
+			Self::List => Self::Image,
+		}
+	}
+}
+
 #[derive(Debug)]
 struct EguiApp {
 	dir_reader:     DirReader,
@@ -111,6 +129,7 @@ struct EguiApp {
 	pan_zoom:       PanZoom,
 	resized_image:  bool,
 	view_mode:      ViewMode,
+	display_mode:   DisplayMode,
 	shortcuts:      Shortcuts,
 
 	/// Entries we're loaded
@@ -138,6 +157,7 @@ impl EguiApp {
 			},
 			resized_image: false,
 			view_mode: ViewMode::FitWindow,
+			display_mode: DisplayMode::Image,
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
 			shortcuts: Shortcuts::default(),
@@ -225,7 +245,7 @@ impl EguiApp {
 	}
 
 	/// Draws the info window
-	fn draw_info_window(&self, ctx: &egui::Context, cur_entry: &CurEntry) {
+	fn draw_info_window(&self, ctx: &egui::Context, cur_entry: Option<&CurEntry>) {
 		egui::Window::new("Path")
 			.title_bar(false)
 			.resizable(false)
@@ -239,16 +259,19 @@ impl EguiApp {
 			.show(ctx, |ui| {
 				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
 
-				let mut info = self.title(cur_entry);
-				let view_mode = match self.view_mode {
-					ViewMode::FitWindow => "Fit window",
-					ViewMode::FitWidth => "Fit width",
-					ViewMode::ActualSize => "Actual size",
-				};
-				write_str!(info, "\nView mode: {view_mode}");
+				let mut info = String::new();
+				if let Some(entry) = cur_entry {
+					write_str!(info, "{}\n", self.title(entry));
+					let view_mode = match self.view_mode {
+						ViewMode::FitWindow => "Fit window",
+						ViewMode::FitWidth => "Fit width",
+						ViewMode::ActualSize => "Actual size",
+					};
+					write_str!(info, "View mode: {view_mode}\n");
+				}
 
 				let sort_order = self.dir_reader.sort_order();
-				write_str!(info, "\nSort order: {}", self::sort_order_name(sort_order));
+				write_str!(info, "Sort order: {}", self::sort_order_name(sort_order));
 
 				if let Some(sort_progress) = self.dir_reader.sort_progress() {
 					write_str!(info, " Sorting {}/{}", sort_progress.sorted, sort_progress.total);
@@ -577,26 +600,13 @@ impl EguiApp {
 
 		output
 	}
-}
 
-impl eframe::App for EguiApp {
-	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-		// For the first 2 frames don't draw anything, because resizes and other
-		// window-related things don't work yet
-		self.next_frame_idx += 1;
-		if self.next_frame_idx <= 2 {
-			return;
-		}
-
+	fn draw_display_image(&mut self, ctx: &egui::Context) {
 		let mut move_prev = false;
 		let mut move_next = false;
 		let mut move_first = false;
 		let mut move_last = false;
-		let mut fullscreen = false;
-		let mut exit_fullscreen_or_quit = false;
-		let mut quit = false;
 		let mut toggle_pause = false;
-		let mut set_sort_order = None;
 		ctx.input_mut(|input| {
 			move_prev = input.consume_key(egui::Modifiers::NONE, self.shortcuts.prev);
 			move_next = input.consume_key(egui::Modifiers::NONE, self.shortcuts.next);
@@ -604,23 +614,8 @@ impl eframe::App for EguiApp {
 			move_first = input.consume_key(egui::Modifiers::NONE, self.shortcuts.first);
 			move_last = input.consume_key(egui::Modifiers::NONE, self.shortcuts.last);
 
-			fullscreen = input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
-			exit_fullscreen_or_quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.exit_fullscreen_or_quit);
-
 			toggle_pause = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_pause);
-			quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.quit);
 
-			for (&kind, &key) in &self.shortcuts.sort {
-				if input.consume_key(egui::Modifiers::NONE, key) {
-					let mut sort_order = self.dir_reader.sort_order();
-					match sort_order.kind == kind {
-						true => sort_order.reverse ^= true,
-						false => sort_order.kind = kind,
-					}
-
-					set_sort_order = Some(sort_order);
-				}
-			}
 
 			for (&view_mode, &key) in &self.shortcuts.view_modes {
 				if input.consume_key(egui::Modifiers::NONE, key) {
@@ -632,10 +627,6 @@ impl eframe::App for EguiApp {
 				}
 			}
 		});
-
-		if let Some(sort_order) = set_sort_order {
-			self.dir_reader.set_sort_order(sort_order);
-		}
 
 		let Some(mut cur_entry) = self.dir_reader.cur_entry() else {
 			return;
@@ -661,7 +652,7 @@ impl eframe::App for EguiApp {
 		let cur_entry = cur_entry;
 		let cur_entry_path = cur_entry.path();
 
-		self.draw_info_window(ctx, &cur_entry);
+		self.draw_info_window(ctx, Some(&cur_entry));
 
 		let panel_output = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 			let window_response = ui.interact(
@@ -723,6 +714,132 @@ impl eframe::App for EguiApp {
 			ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
 		}
 
+		// TODO: Don't change the title each frame?
+		ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title(&cur_entry)));
+
+		if draw_output.remove_cur_entry {
+			self.dir_reader.cur_entry_remove();
+		}
+	}
+
+	fn draw_display_list(&mut self, ctx: &egui::Context) {
+		let mut goto_entry = None;
+
+		egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+			let total_entries = self.dir_reader.len();
+			let entries_per_row = 10;
+			let entry_rows = total_entries.div_ceil(entries_per_row);
+			let entry_height = 200.0;
+
+			self.draw_info_window(ctx, None);
+
+			egui::ScrollArea::vertical()
+				.auto_shrink(false)
+				.show_rows(ui, entry_height, entry_rows, |ui, rows| {
+					let frame = egui::Frame::NONE.outer_margin(50.0);
+					frame.show(ui, |ui| {
+						let row_width = ui.available_width();
+						let entry_width = row_width / entries_per_row as f32;
+
+						egui::Grid::new("entries")
+							.num_columns(entries_per_row)
+							.min_row_height(entry_height)
+							.min_col_width(entry_width)
+							.max_col_width(entry_width)
+							.spacing(egui::Vec2::ZERO)
+							.show(ui, |ui| {
+								for row in rows {
+									let idxs =
+										(row * entries_per_row)..((row + 1) * entries_per_row).min(total_entries);
+									let Some(entries) = self.dir_reader.entry_range(idxs) else {
+										return;
+									};
+
+									for entry in entries {
+										let frame = egui::Frame::NONE.outer_margin(10.0);
+
+										frame.show(ui, |ui| {
+											ui.take_available_width();
+
+											let Some(image_texture) = entry.thumbnail_texture() else {
+												ui.centered_and_justified(|ui| {
+													ui.weak("Loading...");
+												});
+												return;
+											};
+
+											let image = egui::Image::from_texture(
+												egui::load::SizedTexture::from_handle(&image_texture),
+											)
+											.max_size(ui.available_size())
+											.show_loading_spinner(false)
+											.sense(egui::Sense::click());
+
+											ui.centered_and_justified(|ui| {
+												if ui.add(image).double_clicked() {
+													goto_entry = Some(entry);
+												}
+											});
+										});
+									}
+									ui.end_row();
+								}
+							})
+					})
+				});
+		});
+
+		if let Some(entry) = goto_entry {
+			self.dir_reader.cur_entry_set(entry);
+			self.display_mode = DisplayMode::Image;
+		}
+	}
+}
+
+impl eframe::App for EguiApp {
+	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+		// For the first 2 frames don't draw anything, because resizes and other
+		// window-related things don't work yet
+		self.next_frame_idx += 1;
+		if self.next_frame_idx <= 2 {
+			return;
+		}
+
+		let mut fullscreen = false;
+		let mut exit_fullscreen_or_quit = false;
+		let mut quit = false;
+		let mut toggle_display_mode = false;
+		let mut set_sort_order = None;
+		ctx.input_mut(|input| {
+			fullscreen = input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
+			exit_fullscreen_or_quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.exit_fullscreen_or_quit);
+
+			quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.quit);
+
+			toggle_display_mode = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_display_mode);
+
+			for (&kind, &key) in &self.shortcuts.sort {
+				if input.consume_key(egui::Modifiers::NONE, key) {
+					let mut sort_order = self.dir_reader.sort_order();
+					match sort_order.kind == kind {
+						true => sort_order.reverse ^= true,
+						false => sort_order.kind = kind,
+					}
+
+					set_sort_order = Some(sort_order);
+				}
+			}
+		});
+
+		match self.display_mode {
+			DisplayMode::Image => self.draw_display_image(ctx),
+			DisplayMode::List => self.draw_display_list(ctx),
+		}
+
+		if let Some(sort_order) = set_sort_order {
+			self.dir_reader.set_sort_order(sort_order);
+		}
+
 		let is_fullscreen = ctx.input(|input| input.viewport().fullscreen).unwrap_or(false);
 		if fullscreen {
 			ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
@@ -739,11 +856,8 @@ impl eframe::App for EguiApp {
 			ctx.send_viewport_cmd(egui::ViewportCommand::Close);
 		}
 
-		// TODO: Don't change the title each frame?
-		ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title(&cur_entry)));
-
-		if draw_output.remove_cur_entry {
-			self.dir_reader.cur_entry_remove();
+		if toggle_display_mode {
+			self.display_mode = self.display_mode.toggle();
 		}
 	}
 }

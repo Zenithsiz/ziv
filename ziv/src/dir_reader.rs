@@ -17,7 +17,7 @@ use {
 	self::entry::EntryLoadField,
 	crate::{dirs::Dirs, util::AppError},
 	app_error::Context,
-	core::{mem, time::Duration},
+	core::{mem, ops::IntoBounds, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
 		ffi::OsStr,
@@ -132,6 +132,23 @@ impl DirReader {
 		_ = self.sort_thread_tx.send(sort_order);
 	}
 
+	/// Returns a range of entries
+	pub fn entry_range<R>(&self, range: R) -> Option<Vec<DirEntry>>
+	where
+		R: IntoBounds<usize>,
+	{
+		let entries = self
+			.inner
+			.lock()
+			.entries
+			.get(range.into_bounds())?
+			.iter()
+			.map(DirEntry::clone)
+			.collect();
+
+		Some(entries)
+	}
+
 	/// Gets the current entry.
 	///
 	/// # Initialization
@@ -177,6 +194,11 @@ impl DirReader {
 	/// Advances the current entry to the last one
 	pub fn cur_entry_set_last(&self) -> Option<CurEntry> {
 		self.inner.lock().cur_entry_set_last()
+	}
+
+	/// Sets the current entry to an entry
+	pub fn cur_entry_set(&self, entry: DirEntry) {
+		self.inner.lock().cur_entry_set(entry);
 	}
 
 	/// Returns the number of entries
@@ -408,6 +430,7 @@ impl DirReader {
 		dirs: &Dirs,
 		rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>,
 	) {
+		// TODO: Give priority to non-thumbnails here
 		while let Ok((entry, field)) = rx.recv() {
 			// TODO: If we have a `[Texture, RemoveTexture]` fields to load, we
 			//       should probably skip it... somehow
@@ -598,6 +621,13 @@ impl Inner {
 				})
 				.clone(),
 		)
+	}
+
+	/// Sets the current entry to a specific entry
+	///
+	/// See [`DirReader::cur_entry_set`] for details
+	pub fn cur_entry_set(&mut self, entry: DirEntry) {
+		self.cur_entry = Some(CurEntry { entry, idx: None });
 	}
 
 	/// Binary searches the index of `entry`.

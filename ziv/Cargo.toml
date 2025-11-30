@@ -22,6 +22,7 @@ humansize             = { workspace = true }
 image                 = { features = ["default-formats"], workspace = true }
 indexmap              = { workspace = true }
 itertools             = { workspace = true }
+md5                   = { workspace = true }
 natord                = { workspace = true }
 notify                = { workspace = true }
 notify-debouncer-full = { workspace = true }
@@ -31,6 +32,7 @@ serde                 = { features = ["derive", "unstable"], workspace = true }
 strum                 = { features = ["derive"], workspace = true }
 toml                  = { workspace = true }
 tracing               = { workspace = true }
+url                   = { workspace = true }
 walkdir               = { workspace = true }
 zutil-cloned          = { workspace = true }
 zutil-logger          = { workspace = true }

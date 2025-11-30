@@ -22,6 +22,8 @@ pub struct Shortcuts {
 	pub toggle_pause: egui::Key,
 	pub quit:         egui::Key,
 
+	pub toggle_display_mode: egui::Key,
+
 	pub sort: HashMap<SortOrderKind, egui::Key>,
 
 	pub view_modes: HashMap<ViewMode, egui::Key>,
@@ -38,6 +40,7 @@ impl Default for Shortcuts {
 			exit_fullscreen_or_quit: egui::Key::Escape,
 			toggle_pause:            egui::Key::Space,
 			quit:                    egui::Key::Q,
+			toggle_display_mode:     egui::Key::Backspace,
 			sort:                    SortOrderKind::VARIANTS
 				.iter()
 				.map(|&kind| {
