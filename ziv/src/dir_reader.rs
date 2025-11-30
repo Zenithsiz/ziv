@@ -20,6 +20,7 @@ use {
 	core::{mem, ops::IntoBounds, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
+		collections::BinaryHeap,
 		ffi::OsStr,
 		fs::{self},
 		path::{Path, PathBuf},
@@ -430,11 +431,69 @@ impl DirReader {
 		dirs: &Dirs,
 		rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>,
 	) {
-		// TODO: Give priority to non-thumbnails here
-		while let Ok((entry, field)) = rx.recv() {
-			// TODO: If we have a `[Texture, RemoveTexture]` fields to load, we
-			//       should probably skip it... somehow
+		struct PriorityField {
+			entry: DirEntry,
+			field: EntryLoadField,
+		}
 
+		impl PriorityField {
+			const fn priority(&self) -> usize {
+				// TODO: Give priority to the current entry somehow?
+				match self.field {
+					// Getting filenames doesn't block, so we prioritize those first
+					EntryLoadField::FileName => 3,
+
+					// After that, actually showing the images is the next most important
+					// thing, so we do that next
+					EntryLoadField::Texture => 2,
+
+					// These are all about as important
+					EntryLoadField::Metadata |
+					EntryLoadField::ModifiedDate |
+					EntryLoadField::Size |
+					EntryLoadField::ThumbnailTexture => 1,
+
+					// Finally, removal is the least important, so leave those for last.
+					// TODO: Doing this could lead to us running out of resources, but we also
+					//       can't make them too high, or else we risk removing before adding,
+					//       and thus "leaking" the texture. Ideally we'd just remove this.
+					EntryLoadField::RemoveTexture | EntryLoadField::RemoveThumbnailTexture => 0,
+				}
+			}
+		}
+
+		impl PartialEq for PriorityField {
+			fn eq(&self, other: &Self) -> bool {
+				self.cmp(other).is_eq()
+			}
+		}
+		impl Eq for PriorityField {}
+		impl PartialOrd for PriorityField {
+			fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+				Some(self.cmp(other))
+			}
+		}
+		impl Ord for PriorityField {
+			fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+				self.priority().cmp(&other.priority())
+			}
+		}
+
+		let mut queue = BinaryHeap::new();
+		loop {
+			// Asynchronously get any entries from the receiver and sort them into
+			// the priority queue.
+			queue.extend(rx.try_iter().map(|(entry, field)| PriorityField { entry, field }));
+			let (entry, field) = match queue.pop() {
+				Some(value) => (value.entry, value.field),
+				// If we didn't get any, block until we do (or quit if we don't)
+				None => match rx.recv() {
+					Ok(value) => value,
+					Err(_) => break,
+				},
+			};
+
+			// Then load the field
 			if let Err(err) = entry.load_field(egui_ctx, dirs, field) {
 				let path = entry.path();
 				tracing::warn!("Unable to load entry {path:?} field {field:?}, removing: {err:?}");
