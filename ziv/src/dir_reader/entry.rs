@@ -5,7 +5,7 @@ use {
 	super::{SortOrder, SortOrderKind},
 	crate::{
 		dirs::Dirs,
-		util::{AppError, Loadable},
+		util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	},
 	app_error::{Context, app_error},
 	core::{cmp::Ordering, hash::Hash, time::Duration},
@@ -84,12 +84,14 @@ impl DirEntry {
 	}
 
 	/// Tries to gets the metadata
-	fn try_metadata(&self) -> Result<Option<Arc<fs::Metadata>>, AppError> {
+	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<Arc<fs::Metadata>>, AppError> {
 		#[cloned(this = self)]
 		self.0
 			.metadata
 			.lock()
-			.try_load(move || self::load_metadata(&this.path()))
+			.try_load(thread_pool, Priority::DEFAULT, move || {
+				self::load_metadata(&this.path())
+			})
 			.map(|res| res.map(Arc::clone))
 			.context("Unable to get metadata")
 	}
@@ -133,8 +135,8 @@ impl DirEntry {
 	}
 
 	/// Returns this image's file size
-	pub fn try_size(&self) -> Result<Option<u64>, AppError> {
-		let Some(metadata) = self.try_metadata()? else {
+	pub fn try_size(&self, thread_pool: &PriorityThreadPool) -> Result<Option<u64>, AppError> {
+		let Some(metadata) = self.try_metadata(thread_pool)? else {
 			return Ok(None);
 		};
 
@@ -142,12 +144,18 @@ impl DirEntry {
 	}
 
 	/// Returns this image's texture
-	pub fn texture(&self, egui_ctx: &egui::Context) -> Result<Option<egui::TextureHandle>, AppError> {
+	pub fn texture(
+		&self,
+		thread_pool: &PriorityThreadPool,
+		egui_ctx: &egui::Context,
+	) -> Result<Option<egui::TextureHandle>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0
 			.texture
 			.lock()
-			.try_load(move || self::load_texture(&this.path(), &egui_ctx))
+			.try_load(thread_pool, Priority::HIGH, move || {
+				self::load_texture(&this.path(), &egui_ctx)
+			})
 			.map(Option::<&_>::cloned)
 	}
 
@@ -159,6 +167,7 @@ impl DirEntry {
 	/// Returns this image's thumbnail texture
 	pub fn thumbnail_texture(
 		&self,
+		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
 		dirs: &Arc<Dirs>,
 	) -> Result<Option<egui::TextureHandle>, AppError> {
@@ -166,7 +175,9 @@ impl DirEntry {
 		self.0
 			.thumbnail_texture
 			.lock()
-			.try_load(move || self::load_thumbnail_texture(&this.path(), &egui_ctx, &dirs))
+			.try_load(thread_pool, Priority::LOW, move || {
+				self::load_thumbnail_texture(&this.path(), &egui_ctx, &dirs)
+			})
 			.map(Option::<&_>::cloned)
 	}
 

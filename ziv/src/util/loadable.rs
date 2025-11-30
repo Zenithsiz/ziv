@@ -1,7 +1,10 @@
 //! A loadable value
 
 // Imports
-use {super::AppError, app_error::app_error};
+use {
+	super::{AppError, PriorityThreadPool, priority_thread_pool::Priority},
+	app_error::app_error,
+};
 
 /// Loadable value
 // TODO: Move interior mutability to this?
@@ -53,7 +56,12 @@ impl<T> Loadable<T> {
 	}
 
 	/// Tries to load the value
-	pub fn try_load<F>(&mut self, load: F) -> Result<Option<&T>, AppError>
+	pub fn try_load<F>(
+		&mut self,
+		thread_pool: &PriorityThreadPool,
+		priority: Priority,
+		load: F,
+	) -> Result<Option<&T>, AppError>
 	where
 		T: Send + 'static,
 		F: FnOnce() -> Result<T, AppError> + Send + 'static,
@@ -74,9 +82,8 @@ impl<T> Loadable<T> {
 				Err(oneshot::TryRecvError::Disconnected) => app_error::bail!("Loading thread closed"),
 			},
 			None => {
-				// TODO: Allow priority somehow?
 				let (task_tx, task_rx) = oneshot::channel();
-				rayon::spawn(move || {
+				thread_pool.spawn(priority, move || {
 					let res = load();
 					_ = task_tx.send(res);
 				});

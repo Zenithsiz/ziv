@@ -29,7 +29,7 @@ use {
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
 		dirs::Dirs,
 		shortcut::Shortcuts,
-		util::{AppError, RectUtils},
+		util::{AppError, PriorityThreadPool, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -72,6 +72,8 @@ fn run() -> Result<(), AppError> {
 	// Set logger file from arguments
 	logger.set_file(args.log_file.as_deref());
 
+	let thread_pool = PriorityThreadPool::new().context("Unable to create thread pool")?;
+
 	let path = match args.path {
 		Some(path) => path,
 		None => std::env::current_dir().context("Unable to get current directory")?,
@@ -81,7 +83,7 @@ fn run() -> Result<(), AppError> {
 		"ziv",
 		native_options,
 		Box::new(|cc| {
-			let app = EguiApp::new(cc, dirs, path);
+			let app = EguiApp::new(cc, dirs, thread_pool, path);
 			Ok(Box::new(app))
 		}),
 	)
@@ -126,6 +128,7 @@ impl DisplayMode {
 #[derive(Debug)]
 struct EguiApp {
 	dirs:           Arc<Dirs>,
+	thread_pool:    PriorityThreadPool,
 	dir_reader:     DirReader,
 	cur_player:     Option<CurPlayer>,
 	next_frame_idx: usize,
@@ -142,7 +145,12 @@ struct EguiApp {
 
 impl EguiApp {
 	/// Creates a new app
-	pub fn new(cc: &eframe::CreationContext<'_>, dirs: Arc<Dirs>, path: PathBuf) -> Self {
+	pub fn new(
+		cc: &eframe::CreationContext<'_>,
+		dirs: Arc<Dirs>,
+		thread_pool: PriorityThreadPool,
+		path: PathBuf,
+	) -> Self {
 		let dir_reader = DirReader::new(path);
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
@@ -151,6 +159,7 @@ impl EguiApp {
 
 		Self {
 			dirs,
+			thread_pool,
 			dir_reader,
 			cur_player: None,
 			next_frame_idx: 0,
@@ -240,7 +249,7 @@ impl EguiApp {
 			}
 		}
 
-		match cur_entry.try_size() {
+		match cur_entry.try_size(&self.thread_pool) {
 			Ok(Some(size)) => write_str!(title, " {}", humansize::format_size(size, humansize::BINARY)),
 			Ok(None) => (),
 			Err(err) => {
@@ -550,7 +559,7 @@ impl EguiApp {
 				//       `entry.remove_texture`, otherwise the texture would be
 				//       "leaked" (as-in, it would be outside `loaded_entries`
 				//       while being loaded)
-				let image_texture = match input.entry.texture(ui.ctx()) {
+				let image_texture = match input.entry.texture(&self.thread_pool, ui.ctx()) {
 					Ok(texture) => texture,
 					Err(err) => {
 						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
@@ -793,7 +802,11 @@ impl EguiApp {
 										frame.show(ui, |ui| {
 											ui.take_available_width();
 
-											let image_texture = match entry.thumbnail_texture(ui.ctx(), &self.dirs) {
+											let image_texture = match entry.thumbnail_texture(
+												&self.thread_pool,
+												ui.ctx(),
+												&self.dirs,
+											) {
 												Ok(Some(texture)) => texture,
 												Ok(None) => {
 													ui.centered_and_justified(|ui| {

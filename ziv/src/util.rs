@@ -1,10 +1,11 @@
 //! Utilities
 
 // Modules
-mod loadable;
+pub mod loadable;
+pub mod priority_thread_pool;
 
 // Exports
-pub use loadable::Loadable;
+pub use self::{loadable::Loadable, priority_thread_pool::PriorityThreadPool};
 
 // Imports
 use {

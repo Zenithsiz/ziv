@@ -5456,7 +5456,6 @@ dependencies = [
  "oneshot",
  "opener",
  "parking_lot",
- "rayon",
  "serde",
  "strum",
  "toml",
