@@ -1,13 +1,15 @@
 //! A loadable value
 
 // Imports
-use {super::AppError, app_error::app_error};
+use {super::AppError, app_error::app_error, std::thread};
 
 /// Loadable value
+// TODO: Move interior mutability to this?
+#[derive(Debug)]
 pub struct Loadable<T> {
 	value: Option<T>,
 	// TODO: Use a thread pool instead of a thread for each loadable.
-	task:  Option<std::thread::JoinHandle<Result<T, AppError>>>,
+	task:  Option<thread::JoinHandle<Result<T, AppError>>>,
 }
 
 impl<T> Loadable<T> {
@@ -19,12 +21,38 @@ impl<T> Loadable<T> {
 		}
 	}
 
+	/// Sets the value, and removing the task loading it, if any
+	pub fn set(&mut self, value: T) {
+		self.value = Some(value);
+		self.task = None;
+	}
+
 	/// Removes the value and the task loading it, if any
 	pub fn remove(&mut self) {
-		if let Some(_handle) = self.task.take() {
-			// TODO: If we switch to async, abort the handle here
-		}
 		self.value = None;
+		self.task = None;
+	}
+
+	/// Loads this value, blocking until loaded.
+	pub fn load<F>(&mut self, load: F) -> Result<&T, AppError>
+	where
+		T: Send,
+		F: FnOnce() -> Result<T, AppError> + Send,
+	{
+		// TODO: Use pattern matching once polonius comes around
+		if self.value.is_some() {
+			return Ok(self.value.as_ref().expect("Just checked"));
+		}
+
+		let value = match self.task.take() {
+			Some(task) => task
+				.join()
+				.map_err(|err| app_error!("Loading thread panicked: {err:?}"))??,
+			None => load()?,
+		};
+
+		let value = self.value.insert(value);
+		Ok(value)
 	}
 
 	/// Tries to load the value
@@ -55,7 +83,7 @@ impl<T> Loadable<T> {
 				},
 			},
 			None => {
-				let task = std::thread::spawn(load);
+				let task = thread::spawn(load);
 				self.task = Some(task);
 
 				Ok(None)

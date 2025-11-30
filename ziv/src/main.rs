@@ -240,8 +240,13 @@ impl EguiApp {
 			}
 		}
 
-		if let Some(size) = cur_entry.size() {
-			write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
+		match cur_entry.try_size() {
+			Ok(Some(size)) => write_str!(title, " {}", humansize::format_size(size, humansize::BINARY)),
+			Ok(None) => (),
+			Err(err) => {
+				tracing::warn!("Unable to load size {:?}, removing: {err:?}", cur_entry.path());
+				self.dir_reader.cur_entry_remove();
+			},
 		}
 
 		title

@@ -14,13 +14,11 @@ pub use self::{
 
 // Imports
 use {
-	self::entry::EntryLoadField,
 	crate::util::AppError,
 	app_error::Context,
 	core::{mem, ops::IntoBounds, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
-		collections::BinaryHeap,
 		ffi::OsStr,
 		fs::{self},
 		path::{Path, PathBuf},
@@ -55,7 +53,6 @@ pub struct DirReader {
 
 	_read_thread: thread::JoinHandle<()>,
 	_sort_thread: thread::JoinHandle<()>,
-	_load_thread: thread::JoinHandle<()>,
 
 	sort_thread_tx: mpsc::Sender<SortOrder>,
 }
@@ -64,18 +61,16 @@ impl DirReader {
 	/// Creates a new directory reader
 	// TODO: Not need to drill the egui context through here?
 	pub fn new(path: PathBuf) -> Self {
-		let (load_thread_tx, load_thread_rx) = mpsc::channel();
 		let inner = Arc::new(Mutex::new(Inner {
-			sort_order: SortOrder {
+			sort_order:         SortOrder {
 				reverse: false,
 				kind:    SortOrderKind::FileName,
 			},
-			entries: vec![],
-			sort_progress: None,
-			cur_entry: None,
-			visitor: None,
+			entries:            vec![],
+			sort_progress:      None,
+			cur_entry:          None,
+			visitor:            None,
 			allowed_extensions: vec![],
-			load_thread_tx,
 		}));
 
 		#[cloned(inner)]
@@ -93,17 +88,10 @@ impl DirReader {
 			tracing::warn!("Sorting thread returned");
 		});
 
-		#[cloned(inner)]
-		let load_thread = thread::spawn(move || {
-			Self::load_fields(&inner, &load_thread_rx);
-			tracing::warn!("Loader thread returned");
-		});
-
 		Self {
 			inner,
 			_read_thread: read_thread,
 			_sort_thread: sort_thread,
-			_load_thread: load_thread,
 			sort_thread_tx,
 		}
 	}
@@ -361,7 +349,7 @@ impl DirReader {
 
 		// Create the entry and add the metadata if we already have it
 		let mut inner = inner.lock();
-		let entry = DirEntry::new(path.to_owned(), inner.load_thread_tx.clone());
+		let entry = DirEntry::new(path.to_owned());
 		if let Some(metadata) = metadata.try_into_metadata() {
 			entry.set_metadata(metadata);
 		}
@@ -430,63 +418,6 @@ impl DirReader {
 			inner.sort_progress = None;
 		}
 	}
-
-	/// Loads fields on an entry
-	fn load_fields(inner: &Arc<Mutex<Inner>>, rx: &mpsc::Receiver<(DirEntry, EntryLoadField)>) {
-		struct PriorityField {
-			entry: DirEntry,
-			field: EntryLoadField,
-		}
-
-		impl PriorityField {
-			const fn priority(&self) -> usize {
-				// TODO: Give priority to the current entry somehow?
-				match self.field {
-					// These are all about as important
-					EntryLoadField::Metadata | EntryLoadField::ModifiedDate | EntryLoadField::Size => 1,
-				}
-			}
-		}
-
-		impl PartialEq for PriorityField {
-			fn eq(&self, other: &Self) -> bool {
-				self.cmp(other).is_eq()
-			}
-		}
-		impl Eq for PriorityField {}
-		impl PartialOrd for PriorityField {
-			fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-				Some(self.cmp(other))
-			}
-		}
-		impl Ord for PriorityField {
-			fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-				self.priority().cmp(&other.priority())
-			}
-		}
-
-		let mut queue = BinaryHeap::new();
-		loop {
-			// Asynchronously get any entries from the receiver and sort them into
-			// the priority queue.
-			queue.extend(rx.try_iter().map(|(entry, field)| PriorityField { entry, field }));
-			let (entry, field) = match queue.pop() {
-				Some(value) => (value.entry, value.field),
-				// If we didn't get any, block until we do (or quit if we don't)
-				None => match rx.recv() {
-					Ok(value) => value,
-					Err(_) => break,
-				},
-			};
-
-			// Then load the field
-			if let Err(err) = entry.load_field(field) {
-				let path = entry.path();
-				tracing::warn!("Unable to load entry {path:?} field {field:?}, removing: {err:?}");
-				inner.lock().remove(&path);
-			}
-		}
-	}
 }
 
 enum MetadataOrFileType {
@@ -526,8 +457,6 @@ struct Inner {
 	visitor: Option<Arc<dyn Visitor + Send + Sync>>,
 
 	allowed_extensions: Vec<&'static str>,
-
-	load_thread_tx: mpsc::Sender<(DirEntry, EntryLoadField)>,
 }
 
 impl Inner {
