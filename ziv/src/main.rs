@@ -817,7 +817,9 @@ impl eframe::App for EguiApp {
 		let mut toggle_display_mode = false;
 		let mut set_sort_order = None;
 		ctx.input_mut(|input| {
-			fullscreen = input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
+			fullscreen |= input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
+			fullscreen |= input.pointer.button_double_clicked(egui::PointerButton::Primary);
+
 			exit_fullscreen_or_quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.exit_fullscreen_or_quit);
 
 			quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.quit);
