@@ -565,7 +565,12 @@ impl EguiApp {
 
 				output.image_size = Some(image_size);
 
-				let window_size = match self.resized_image {
+				// Note: If we're in fullscreen, we shouldn't resize yet.
+				//       If we did, the user might notice a flicker, because
+				//       our resize size isn't the fullscreen size the user
+				//       is using, and resizing won't change that.
+				let is_fullscreen = ui.input(|input| input.viewport().fullscreen).unwrap_or(false);
+				let window_size = match self.resized_image || is_fullscreen {
 					true => ui.available_size().round_ui(),
 					false => {
 						let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size) else {
