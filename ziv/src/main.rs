@@ -11,7 +11,8 @@
 	exact_size_is_empty,
 	decl_macro,
 	range_into_bounds,
-	path_is_empty
+	path_is_empty,
+	yeet_expr
 )]
 
 // Modules

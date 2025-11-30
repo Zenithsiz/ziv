@@ -1,36 +1,35 @@
 //! A loadable value
 
 // Imports
-use {super::AppError, app_error::app_error, std::thread};
+use {super::AppError, app_error::app_error};
 
 /// Loadable value
 // TODO: Move interior mutability to this?
 #[derive(Debug)]
 pub struct Loadable<T> {
-	value: Option<T>,
-	// TODO: Use a thread pool instead of a thread for each loadable.
-	task:  Option<thread::JoinHandle<Result<T, AppError>>>,
+	value:   Option<T>,
+	task_rx: Option<oneshot::Receiver<Result<T, AppError>>>,
 }
 
 impl<T> Loadable<T> {
 	/// Creates a new, empty, loadable
 	pub const fn new() -> Self {
 		Self {
-			value: None,
-			task:  None,
+			value:   None,
+			task_rx: None,
 		}
 	}
 
 	/// Sets the value, and removing the task loading it, if any
 	pub fn set(&mut self, value: T) {
 		self.value = Some(value);
-		self.task = None;
+		self.task_rx = None;
 	}
 
 	/// Removes the value and the task loading it, if any
 	pub fn remove(&mut self) {
 		self.value = None;
-		self.task = None;
+		self.task_rx = None;
 	}
 
 	/// Loads this value, blocking until loaded.
@@ -44,10 +43,8 @@ impl<T> Loadable<T> {
 			return Ok(self.value.as_ref().expect("Just checked"));
 		}
 
-		let value = match self.task.take() {
-			Some(task) => task
-				.join()
-				.map_err(|err| app_error!("Loading thread panicked: {err:?}"))??,
+		let value = match self.task_rx.take() {
+			Some(rx) => rx.recv().map_err(|_| app_error!("Loading thread closed"))??,
 			None => load()?,
 		};
 
@@ -66,25 +63,24 @@ impl<T> Loadable<T> {
 			return Ok(Some(self.value.as_ref().expect("Just checked")));
 		}
 
-		match self.task.take() {
-			Some(task) => match task.is_finished() {
-				true => {
-					// Note: We return the inner error without any context
-					let value = task
-						.join()
-						.map_err(|err| app_error!("Loading thread panicked: {err:?}"))??;
-					let value = self.value.insert(value);
-
-					Ok(Some(value))
+		match &self.task_rx {
+			Some(task_rx) => match task_rx.try_recv() {
+				Ok(res) => {
+					self.task_rx = None;
+					let value = res?;
+					Ok(Some(self.value.insert(value)))
 				},
-				false => {
-					self.task = Some(task);
-					Ok(None)
-				},
+				Err(oneshot::TryRecvError::Empty) => Ok(None),
+				Err(oneshot::TryRecvError::Disconnected) => app_error::bail!("Loading thread closed"),
 			},
 			None => {
-				let task = thread::spawn(load);
-				self.task = Some(task);
+				// TODO: Allow priority somehow?
+				let (task_tx, task_rx) = oneshot::channel();
+				rayon::spawn(move || {
+					let res = load();
+					_ = task_tx.send(res);
+				});
+				self.task_rx = Some(task_rx);
 
 				Ok(None)
 			},
