@@ -3,7 +3,10 @@
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::{AppError, OptionInspectNone},
+	crate::{
+		dirs::Dirs,
+		util::{AppError, OptionInspectNone},
+	},
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
@@ -75,7 +78,7 @@ impl Inner {
 		})
 	}
 
-	fn load_texture(&self, egui_ctx: &egui::Context) -> Result<(), AppError> {
+	fn load_texture(&self, egui_ctx: &egui::Context, _dirs: &Dirs) -> Result<(), AppError> {
 		let _texture_load = self.texture_load.lock();
 		let mut texture = self.texture.lock();
 		match &*texture {
@@ -201,13 +204,18 @@ impl DirEntry {
 	}
 
 	/// Loads a field
-	pub(super) fn load_field(&self, egui_ctx: &egui::Context, field: EntryLoadField) -> Result<(), AppError> {
+	pub(super) fn load_field(
+		&self,
+		egui_ctx: &egui::Context,
+		dirs: &Dirs,
+		field: EntryLoadField,
+	) -> Result<(), AppError> {
 		match field {
 			EntryLoadField::FileName => _ = self.0.load_file_name().context("Unable to load file name")?,
 			EntryLoadField::Metadata => _ = self.0.load_metadata().context("Unable to load metadata")?,
 			EntryLoadField::ModifiedDate => _ = self.0.load_modified_date().context("Unable to load modified date")?,
 			EntryLoadField::Size => _ = self.0.load_size().context("Unable to load size")?,
-			EntryLoadField::Texture => self.0.load_texture(egui_ctx).context("Unable to load texture")?,
+			EntryLoadField::Texture => self.0.load_texture(egui_ctx, dirs).context("Unable to load texture")?,
 			EntryLoadField::RemoveTexture => self.0.remove_texture(),
 		}
 

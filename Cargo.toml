@@ -18,6 +18,7 @@ ziv = { path = "ziv" }
 app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "e21d2eab03d97a675c4b44ccfa4df00e18d56ba7" }
 clap                  = "4.5.47"
 derive_more           = "2.0.1"
+directories           = "6.0.0"
 eframe                = "0.33.2"
 egui                  = "0.33.2"
 egui-video            = { git = "https://github.com/Zenithsiz/egui-video" }

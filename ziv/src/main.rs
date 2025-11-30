@@ -15,6 +15,7 @@
 // Modules
 mod args;
 mod dir_reader;
+mod dirs;
 mod shortcut;
 mod util;
 
@@ -23,16 +24,18 @@ use {
 	self::{
 		args::Args,
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
+		dirs::Dirs,
 		shortcut::Shortcuts,
 		util::{AppError, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
 	core::time::Duration,
+	directories::ProjectDirs,
 	egui::emath::GuiRounding,
 	indexmap::IndexSet,
 	itertools::Itertools,
-	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode},
+	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode, sync::Arc},
 	strum::VariantArray,
 	zutil_logger::Logger,
 };
@@ -59,6 +62,10 @@ fn run() -> Result<(), AppError> {
 	let args = Args::parse();
 	tracing::debug!(?args, "Arguments");
 
+	let dirs = ProjectDirs::from("", "", "ziv").context("Unable to create app directories")?;
+	let dirs = Dirs::new(dirs.cache_dir().to_owned());
+	let dirs = Arc::new(dirs);
+
 	// Set logger file from arguments
 	logger.set_file(args.log_file.as_deref());
 
@@ -71,7 +78,7 @@ fn run() -> Result<(), AppError> {
 		"ziv",
 		native_options,
 		Box::new(|cc| {
-			let app = EguiApp::new(cc, path);
+			let app = EguiApp::new(cc, &dirs, path);
 			Ok(Box::new(app))
 		}),
 	)
@@ -113,9 +120,9 @@ struct EguiApp {
 
 impl EguiApp {
 	/// Creates a new app
-	pub fn new(cc: &eframe::CreationContext<'_>, path: PathBuf) -> Self {
+	pub fn new(cc: &eframe::CreationContext<'_>, dirs: &Arc<Dirs>, path: PathBuf) -> Self {
 		egui_extras::install_image_loaders(&cc.egui_ctx);
-		let dir_reader = DirReader::new(path, &cc.egui_ctx);
+		let dir_reader = DirReader::new(path, &cc.egui_ctx, dirs);
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
