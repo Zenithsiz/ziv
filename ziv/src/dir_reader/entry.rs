@@ -11,6 +11,7 @@ use {
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
+		ffi::OsStr,
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
 		sync::{Arc, OnceLock, mpsc},
@@ -141,15 +142,37 @@ impl Inner {
 					let image = match image::open(&cache_path) {
 						Ok(image) => image,
 						Err(err) => {
-							tracing::debug!(?path, ?cache_path, ?err, "No thumbnail found, generating one");
-							let image = image::open(&path).context("Unable to read image")?;
-							let image = image.thumbnail(256, 256);
+							// Note: `image` supports gifs, so we can still generate thumbnails for them
+							let is_video = path
+								.extension()
+								.and_then(OsStr::to_str)
+								.is_some_and(|ext| ["webm", "mp4", "mkv"].contains(&ext));
 
-							// TODO: Make saving the thumbnail a non-fatal error
-							fs::create_dir_all(dirs.thumbnails()).context("Unable to create thumbnails directory")?;
-							image.save(cache_path).context("Unable to save thumbnail")?;
+							match is_video {
+								true => {
+									tracing::debug!(
+										?path,
+										?cache_path,
+										?err,
+										"No thumbnail found, but path was a video, so skipping thumbnail"
+									);
 
-							image
+									// TODO: Implement video thumbnails
+									image::DynamicImage::new_rgba8(256, 256)
+								},
+								false => {
+									tracing::debug!(?path, ?cache_path, ?err, "No thumbnail found, generating one");
+									let image = image::open(&path).context("Unable to read image")?;
+									let thumbnail = image.thumbnail(256, 256);
+
+									// TODO: Make saving the thumbnail a non-fatal error
+									fs::create_dir_all(dirs.thumbnails())
+										.context("Unable to create thumbnails directory")?;
+									thumbnail.save(cache_path).context("Unable to save thumbnail")?;
+
+									thumbnail
+								},
+							}
 						},
 					};
 
