@@ -15,7 +15,6 @@ directories           = { workspace = true }
 eframe                = { workspace = true }
 egui                  = { features = ["serde"], workspace = true }
 egui-video            = { workspace = true }
-egui_extras           = { features = ["all_loaders"], workspace = true }
 either                = { workspace = true }
 extend                = { workspace = true }
 humansize             = { workspace = true }

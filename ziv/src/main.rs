@@ -143,7 +143,6 @@ struct EguiApp {
 impl EguiApp {
 	/// Creates a new app
 	pub fn new(cc: &eframe::CreationContext<'_>, dirs: Arc<Dirs>, path: PathBuf) -> Self {
-		egui_extras::install_image_loaders(&cc.egui_ctx);
 		let dir_reader = DirReader::new(path);
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),

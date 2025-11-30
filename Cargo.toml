@@ -22,7 +22,6 @@ directories           = "6.0.0"
 eframe                = "0.33.2"
 egui                  = "0.33.2"
 egui-video            = { git = "https://github.com/Zenithsiz/egui-video" }
-egui_extras           = "0.33.2"
 either                = "1.15.0"
 extend                = "1.2.0"
 humansize             = "2.1.3"
