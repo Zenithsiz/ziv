@@ -866,7 +866,7 @@ impl EguiApp {
 														"Unable to load image {:?}, removing: {err:?}",
 														entry.path()
 													);
-													self.dir_reader.cur_entry_remove();
+													self.dir_reader.remove(&entry);
 												},
 											}
 

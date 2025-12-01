@@ -190,6 +190,11 @@ impl DirReader {
 		self.inner.lock().cur_entry_set(entry);
 	}
 
+	/// Removes an entry from the list
+	pub fn remove(&self, entry: &DirEntry) {
+		self.inner.lock().remove(&entry.path());
+	}
+
 	/// Returns the number of entries
 	pub fn len(&self) -> usize {
 		self.inner.lock().entries.len()
