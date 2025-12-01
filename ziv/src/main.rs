@@ -870,10 +870,20 @@ impl EguiApp {
 												},
 											}
 
-											ui.add_space(ui.available_height() - text_body_height);
+											let file_name_height_id = egui::Id::new(("display-list-hover", &entry));
+											let file_name_height =
+												ui.data(|data| data.get_temp(file_name_height_id)).unwrap_or(0.0);
+
+											let spacing = ui.available_height() - file_name_height;
+											if spacing > 0.0 {
+												ui.add_space(spacing);
+											}
 
 											if let Ok(file_name) = entry.file_name() {
-												ui.label(file_name);
+												let response = ui.label(file_name);
+												ui.data_mut(|data| {
+													data.insert_temp(file_name_height_id, response.rect.height());
+												});
 											}
 										});
 									});
