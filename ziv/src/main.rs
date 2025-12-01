@@ -35,7 +35,7 @@ use {
 	clap::Parser,
 	core::time::Duration,
 	directories::ProjectDirs,
-	egui::emath::GuiRounding,
+	egui::{Widget, emath::GuiRounding},
 	indexmap::IndexSet,
 	itertools::Itertools,
 	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode, sync::Arc},
@@ -127,16 +127,17 @@ impl DisplayMode {
 
 #[derive(Debug)]
 struct EguiApp {
-	dirs:           Arc<Dirs>,
-	thread_pool:    PriorityThreadPool,
-	dir_reader:     DirReader,
-	cur_player:     Option<CurPlayer>,
-	next_frame_idx: usize,
-	pan_zoom:       PanZoom,
-	resized_image:  bool,
-	view_mode:      ViewMode,
-	display_mode:   DisplayMode,
-	shortcuts:      Shortcuts,
+	dirs:            Arc<Dirs>,
+	thread_pool:     PriorityThreadPool,
+	dir_reader:      DirReader,
+	cur_player:      Option<CurPlayer>,
+	next_frame_idx:  usize,
+	pan_zoom:        PanZoom,
+	resized_image:   bool,
+	view_mode:       ViewMode,
+	display_mode:    DisplayMode,
+	shortcuts:       Shortcuts,
+	entries_per_row: usize,
 
 	/// Entries we're loaded
 	loaded_entries:     IndexSet<DirEntry>,
@@ -173,6 +174,7 @@ impl EguiApp {
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
 			shortcuts: Shortcuts::default(),
+			entries_per_row: 4,
 		}
 	}
 
@@ -776,82 +778,111 @@ impl EguiApp {
 	fn draw_display_list(&mut self, ctx: &egui::Context) {
 		let mut goto_entry = None;
 
+		egui::TopBottomPanel::top("display-list-controls")
+			.show_separator_line(false)
+			.frame(egui::Frame::NONE)
+			.show(ctx, |ui| {
+				self.draw_info_window(ctx, None);
+
+				ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+					egui::Slider::new(&mut self.entries_per_row, 1..=10).ui(ui);
+					ui.label("Columns: ");
+				});
+			});
+
 		egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 			let total_entries = self.dir_reader.len();
-			let entries_per_row = 10;
-			let entry_rows = total_entries.div_ceil(entries_per_row);
-			let entry_height = 200.0;
+			let entry_rows = total_entries.div_ceil(self.entries_per_row);
+			let image_height = ui.available_width() / self.entries_per_row as f32;
 
-			self.draw_info_window(ctx, None);
+			// TODO: Not have to manually calculate this
+			let text_body_height = ui.text_style_height(&egui::TextStyle::Body);
+			let row_height = ui.available_width() / self.entries_per_row as f32 +
+				text_body_height +
+				10.0 * 2.0 + 5.0 * 2.0 +
+				1.0 * 2.0;
 
 			egui::ScrollArea::vertical()
 				.auto_shrink(false)
-				.show_rows(ui, entry_height, entry_rows, |ui, rows| {
-					let frame = egui::Frame::NONE.outer_margin(50.0);
-					frame.show(ui, |ui| {
-						let row_width = ui.available_width();
-						let entry_width = row_width / entries_per_row as f32;
+				.show_rows(ui, row_height, entry_rows, |ui, rows| {
+					let row_width = ui.available_width();
+					let cell_width = row_width / self.entries_per_row as f32;
+					let cell_height = row_height;
 
-						egui::Grid::new("entries")
-							.num_columns(entries_per_row)
-							.min_row_height(entry_height)
-							.min_col_width(entry_width)
-							.max_col_width(entry_width)
-							.spacing(egui::Vec2::ZERO)
-							.show(ui, |ui| {
-								for row in rows {
-									let idxs =
-										(row * entries_per_row)..((row + 1) * entries_per_row).min(total_entries);
-									let Some(entries) = self.dir_reader.entry_range(idxs) else {
-										return;
+					egui::Grid::new("display-list-entries")
+						.num_columns(self.entries_per_row)
+						.min_row_height(cell_height)
+						.min_col_width(cell_width)
+						.max_col_width(cell_width)
+						.start_row(rows.start)
+						.spacing([0.0, 0.0])
+						.show(ui, |ui| {
+							for row in rows {
+								let idxs =
+									(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
+								let Some(entries) = self.dir_reader.entry_range(idxs) else {
+									return;
+								};
+
+								for entry in entries {
+									let hovered_id = egui::Id::new(("display-list-hover", &entry));
+
+									let hovered = ui.data(|data| data.get_temp(hovered_id)).unwrap_or(false);
+									let stroke_color = match hovered {
+										true => egui::Color32::from_rgba_premultiplied(0xd0, 0xd0, 0xd0, 0xff),
+										false => egui::Color32::TRANSPARENT,
 									};
 
-									for entry in entries {
-										let frame = egui::Frame::NONE.outer_margin(10.0);
+									let frame = egui::Frame::NONE
+										.inner_margin(5)
+										.outer_margin(10)
+										.stroke(egui::Stroke::new(1.0, stroke_color))
+										.fill(egui::Color32::from_rgba_premultiplied(0x10, 0x10, 0x10, 0xff))
+										.corner_radius(2);
 
-										frame.show(ui, |ui| {
-											ui.take_available_width();
+									let frame_res = frame.show(ui, |ui| {
+										ui.take_available_space();
 
-											let image_texture = match entry.thumbnail_texture(
-												&self.thread_pool,
-												ui.ctx(),
-												&self.dirs,
-											) {
-												Ok(Some(texture)) => texture,
-												Ok(None) => {
-													ui.centered_and_justified(|ui| {
-														ui.weak("Loading...");
-													});
-													return;
+										let image_width = ui.available_width();
+										let image_size = egui::vec2(image_width, image_height);
+
+										ui.vertical_centered_justified(|ui| {
+											match entry.thumbnail_texture(&self.thread_pool, ui.ctx(), &self.dirs) {
+												Ok(Some(image_texture)) => {
+													let image = egui::Image::from_texture(
+														egui::load::SizedTexture::from_handle(&image_texture),
+													)
+													.fit_to_exact_size(image_size)
+													.show_loading_spinner(false)
+													.sense(egui::Sense::click());
+
+													if ui.add(image).double_clicked() {
+														goto_entry = Some(entry.clone());
+													}
 												},
+												Ok(None) => {},
 												Err(err) => {
 													tracing::warn!(
 														"Unable to load image {:?}, removing: {err:?}",
 														entry.path()
 													);
 													self.dir_reader.cur_entry_remove();
-													return;
 												},
-											};
+											}
 
-											let image = egui::Image::from_texture(
-												egui::load::SizedTexture::from_handle(&image_texture),
-											)
-											.max_size(ui.available_size())
-											.show_loading_spinner(false)
-											.sense(egui::Sense::click());
+											ui.add_space(ui.available_height() - text_body_height);
 
-											ui.centered_and_justified(|ui| {
-												if ui.add(image).double_clicked() {
-													goto_entry = Some(entry);
-												}
-											});
+											if let Ok(file_name) = entry.file_name() {
+												ui.label(file_name);
+											}
 										});
-									}
-									ui.end_row();
+									});
+
+									ui.data_mut(|data| data.insert_temp(hovered_id, frame_res.response.hovered()));
 								}
-							})
-					})
+								ui.end_row();
+							}
+						});
 				});
 		});
 
