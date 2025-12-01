@@ -643,12 +643,15 @@ impl EguiApp {
 	}
 
 	fn draw_display_image(&mut self, ctx: &egui::Context) {
+		let mut fullscreen = false;
 		let mut move_prev = false;
 		let mut move_next = false;
 		let mut move_first = false;
 		let mut move_last = false;
 		let mut toggle_pause = false;
 		ctx.input_mut(|input| {
+			fullscreen = input.pointer.button_double_clicked(egui::PointerButton::Primary);
+
 			move_prev = input.consume_key(egui::Modifiers::NONE, self.shortcuts.prev);
 			move_next = input.consume_key(egui::Modifiers::NONE, self.shortcuts.next);
 
@@ -761,6 +764,13 @@ impl EguiApp {
 		if draw_output.remove_cur_entry {
 			self.dir_reader.cur_entry_remove();
 		}
+
+		// TODO: Don't duplicate this by returning the fact that we want to fullscreen instead
+		// TODO: Also allow double-clicking an empty part in the display list to fullscreen
+		let is_fullscreen = ctx.input(|input| input.viewport().fullscreen).unwrap_or(false);
+		if fullscreen {
+			ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+		}
 	}
 
 	fn draw_display_list(&mut self, ctx: &egui::Context) {
@@ -867,8 +877,7 @@ impl eframe::App for EguiApp {
 		let mut toggle_display_mode = false;
 		let mut set_sort_order = None;
 		ctx.input_mut(|input| {
-			fullscreen |= input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
-			fullscreen |= input.pointer.button_double_clicked(egui::PointerButton::Primary);
+			fullscreen = input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
 
 			exit_fullscreen_or_quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.exit_fullscreen_or_quit);
 
