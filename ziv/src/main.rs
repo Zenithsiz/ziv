@@ -877,7 +877,14 @@ impl EguiApp {
 														goto_entry = Some(entry.clone());
 													}
 												},
-												Ok(None) => {},
+												Ok(None) => {
+													let response =
+														ui.allocate_response(image_size, egui::Sense::click());
+
+													if response.double_clicked() {
+														goto_entry = Some(entry.clone());
+													}
+												},
 												Err(err) => {
 													tracing::warn!(
 														"Unable to load image {:?}, removing: {err:?}",
