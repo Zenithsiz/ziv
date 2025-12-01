@@ -900,7 +900,14 @@ impl EguiApp {
 
 											let spacing = ui.available_height() - file_name_height;
 											if spacing > 0.0 {
-												ui.add_space(spacing);
+												let response = ui.allocate_response(
+													egui::vec2(ui.available_width(), spacing),
+													egui::Sense::click(),
+												);
+
+												if response.double_clicked() {
+													goto_entry = Some(entry.clone());
+												}
 											}
 
 											if let Ok(file_name) = entry.file_name() {
