@@ -296,7 +296,7 @@ impl DirReader {
 			if let Some(begin_entry) = &begin_entry &&
 				&*begin_entry.path() == entry_path
 			{
-				return Ok(());
+				continue;
 			}
 
 			if let Err(err) = Self::read_dir_entry(inner, entry_path, &entry) {
