@@ -301,6 +301,7 @@ impl EguiApp {
 	}
 
 	/// Draws an image over the whole screen
+	#[expect(clippy::too_many_arguments, reason = "TODO: Bundle them up in a single type")]
 	fn draw_image(
 		ui: &mut egui::Ui,
 		image: egui::Image,
@@ -309,6 +310,7 @@ impl EguiApp {
 		pan_zoom: &mut PanZoom,
 		view_mode: ViewMode,
 		window_response: &egui::Response,
+		vertical_pan: f32,
 	) -> egui::Response {
 		let window_as = window_size.y / window_size.x;
 		let image_as = image_size.y / image_size.x;
@@ -414,8 +416,11 @@ impl EguiApp {
 		// When dragging or scrolling, handle panning
 		// Note: `translation_delta` uses both scrolling and pan gestures (on mobile, which don't include dragging,
 		//       for some reason, which is why we add it separately)
+		// TODO: Smooth the vertical pan?
 		// TODO: Make this scroll sensitivity configurable
-		let drag_delta = image_response.drag_delta() + ui.input(egui::InputState::translation_delta) * 2.0;
+		let drag_delta = image_response.drag_delta() +
+			ui.input(egui::InputState::translation_delta) * 2.0 +
+			egui::vec2(0.0, vertical_pan) * window_size / 5.0;
 		if drag_delta != egui::Vec2::ZERO {
 			pan_zoom.offset -= drag_delta * zoom_scale * image_size / ui_size;
 		}
@@ -532,6 +537,7 @@ impl EguiApp {
 					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
+					input.vertical_pan,
 				));
 
 				player.player.render_controls(ui, input.window_response);
@@ -633,6 +639,7 @@ impl EguiApp {
 					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
+					input.vertical_pan,
 				));
 
 				if !input.entry.has_image_details() {
@@ -651,6 +658,7 @@ impl EguiApp {
 		let mut move_first = false;
 		let mut move_last = false;
 		let mut toggle_pause = false;
+		let mut vertical_pan = 0.0;
 		ctx.input_mut(|input| {
 			fullscreen = input.pointer.button_double_clicked(egui::PointerButton::Primary);
 
@@ -661,6 +669,14 @@ impl EguiApp {
 			move_last = input.consume_key(egui::Modifiers::NONE, self.shortcuts.last);
 
 			toggle_pause = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_pause);
+
+			// TODO: Make these configurable?
+			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+				vertical_pan += 1.0;
+			}
+			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+				vertical_pan -= 1.0;
+			}
 
 
 			for (&view_mode, &key) in &self.shortcuts.view_modes {
@@ -711,6 +727,7 @@ impl EguiApp {
 				toggle_pause,
 				entry: &cur_entry,
 				window_response: &window_response,
+				vertical_pan,
 			};
 			let mut draw_output = self.draw_entry(ui, draw_input);
 			let response = match draw_output.window_response.take() {
@@ -1005,6 +1022,7 @@ struct DrawInput<'a> {
 	entry:           &'a CurEntry,
 	window_response: &'a egui::Response,
 	toggle_pause:    bool,
+	vertical_pan:    f32,
 }
 
 #[derive(Clone, Debug)]
