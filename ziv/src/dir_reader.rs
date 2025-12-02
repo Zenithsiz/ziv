@@ -19,6 +19,7 @@ use {
 	core::{mem, ops::IntoBounds, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
+		collections::HashSet,
 		ffi::OsStr,
 		fs::{self},
 		path::{Path, PathBuf},
@@ -70,7 +71,7 @@ impl DirReader {
 			sort_progress:      None,
 			cur_entry:          None,
 			visitor:            None,
-			allowed_extensions: vec![],
+			allowed_extensions: HashSet::new(),
 		}));
 
 		#[cloned(inner)]
@@ -102,8 +103,11 @@ impl DirReader {
 	}
 
 	/// Adds allowed extensions
-	pub fn add_allowed_extensions(&self, extensions: impl IntoIterator<Item = &'static str>) {
-		self.inner.lock().allowed_extensions.extend(extensions);
+	pub fn add_allowed_extensions(&self, extensions: impl IntoIterator<Item: Into<String>>) {
+		self.inner
+			.lock()
+			.allowed_extensions
+			.extend(extensions.into_iter().map(Into::into));
 	}
 
 	/// Gets the sort order
@@ -346,7 +350,7 @@ impl DirReader {
 		if path
 			.extension()
 			.and_then(OsStr::to_str)
-			.is_none_or(|ext| !inner.lock().allowed_extensions.contains(&ext))
+			.is_none_or(|ext| !inner.lock().allowed_extensions.contains(ext))
 		{
 			tracing::info!("Ignoring non-image: {path:?}");
 			return Ok(None);
@@ -461,7 +465,7 @@ struct Inner {
 	#[debug(ignore)]
 	visitor: Option<Arc<dyn Visitor + Send + Sync>>,
 
-	allowed_extensions: Vec<&'static str>,
+	allowed_extensions: HashSet<String>,
 }
 
 impl Inner {

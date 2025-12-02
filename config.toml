@@ -1,0 +1,3 @@
+[exts]
+image = ["jpg", "jpeg", "png", "webp"]
+video = ["gif", "mkv", "mp4", "webm"]

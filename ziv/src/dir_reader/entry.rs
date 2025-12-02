@@ -8,6 +8,7 @@ use {
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::Mutex,
 	std::{
+		collections::HashSet,
 		ffi::OsStr,
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
@@ -167,13 +168,14 @@ impl DirEntry {
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Arc<Path>,
+		video_exts: &Arc<HashSet<String>>,
 	) -> Result<Option<egui::TextureHandle>, AppError> {
-		#[cloned(this = self, egui_ctx, thumbnails_dir)]
+		#[cloned(this = self, egui_ctx, thumbnails_dir, video_exts)]
 		self.0
 			.thumbnail_texture
 			.lock()
 			.try_load(thread_pool, Priority::LOW, move || {
-				self::load_thumbnail_texture(&this.path(), &egui_ctx, &thumbnails_dir)
+				self::load_thumbnail_texture(&this.path(), &egui_ctx, &thumbnails_dir, &video_exts)
 			})
 			.map(Option::<&_>::cloned)
 	}
@@ -271,6 +273,7 @@ fn load_thumbnail_texture(
 	path: &Path,
 	egui_ctx: &egui::Context,
 	thumbnails_dir: &Path,
+	video_exts: &HashSet<String>,
 ) -> Result<egui::TextureHandle, AppError> {
 	let cache_path = {
 		let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
@@ -290,7 +293,7 @@ fn load_thumbnail_texture(
 			let is_video = path
 				.extension()
 				.and_then(OsStr::to_str)
-				.is_some_and(|ext| ["webm", "mp4", "mkv"].contains(&ext));
+				.is_some_and(|ext| ext != "gif" && video_exts.contains(ext));
 
 			match is_video {
 				true => {
