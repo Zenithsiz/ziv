@@ -9,7 +9,7 @@ use {
 	parking_lot::Mutex,
 	std::{
 		collections::HashSet,
-		ffi::OsStr,
+		ffi::{OsStr, OsString},
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
 		sync::Arc,
@@ -56,14 +56,10 @@ impl DirEntry {
 	}
 
 	/// Returns this entry's file name
-	pub fn file_name(&self) -> Result<String, AppError> {
-		// TODO: Avoid having to clone the string?
+	pub fn file_name(&self) -> Result<OsString, AppError> {
+		// TODO: Avoid having to clone the file name
 		let path = self.path();
-		path.file_name()
-			.context("Missing file name")?
-			.to_str()
-			.map(str::to_owned)
-			.context("File name was non-utf8")
+		path.file_name().context("Missing file name").map(OsStr::to_owned)
 	}
 
 	/// Renames this entry
@@ -188,10 +184,17 @@ impl DirEntry {
 	/// Compares two directory entries according to a sort order
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Result<Ordering, AppError> {
 		let cmp = match order.kind {
-			SortOrderKind::FileName => natord::compare(
-				&self.file_name().context("Unable to get file name")?,
-				&other.file_name().context("Unable to get file name")?,
-			),
+			SortOrderKind::FileName => {
+				let lhs = self.file_name().context("Unable to get file name")?;
+				let rhs = other.file_name().context("Unable to get file name")?;
+				natord::compare_iter(
+					lhs.as_encoded_bytes().iter(),
+					rhs.as_encoded_bytes().iter(),
+					|&c| c.is_ascii_whitespace(),
+					|&l, &r| l.cmp(r),
+					|&c| c.is_ascii_digit().then(|| isize::from(c - b'0')),
+				)
+			},
 			SortOrderKind::ModificationDate => {
 				let lhs = self.modified_date_blocking()?;
 				let rhs = other.modified_date_blocking()?;

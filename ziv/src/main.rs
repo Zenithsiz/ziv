@@ -951,7 +951,7 @@ impl EguiApp {
 											}
 
 											if let Ok(file_name) = entry.file_name() {
-												let response = ui.label(file_name);
+												let response = ui.label(file_name.display().to_string());
 												ui.data_mut(|data| {
 													data.insert_temp(file_name_height_id, response.rect.height());
 												});
