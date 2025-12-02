@@ -527,27 +527,20 @@ impl EguiApp {
 			true => {
 				let player = match &mut self.cur_player {
 					Some(player) if player.entry == *input.entry => player,
-					_ => {
-						let Some(path) = entry_path.to_str() else {
-							tracing::warn!("Non-utf8 video paths cannot be played currently");
+					_ => match egui_video::Player::new(ui.ctx(), entry_path.to_path_buf()) {
+						Ok(mut player) => {
+							player.start();
+							output.resize_size = Some(player.size);
+							self.cur_player.insert(CurPlayer {
+								entry: input.entry.clone().into(),
+								player,
+							})
+						},
+						Err(err) => {
+							tracing::warn!("{:?}", err.context("Unable to create video player"));
 							output.remove_cur_entry = true;
 							return output;
-						};
-						match egui_video::Player::new(ui.ctx(), &path.to_owned()) {
-							Ok(mut player) => {
-								player.start();
-								output.resize_size = Some(player.size);
-								self.cur_player.insert(CurPlayer {
-									entry: input.entry.clone().into(),
-									player,
-								})
-							},
-							Err(err) => {
-								tracing::warn!("{:?}", err.context("Unable to create video player"));
-								output.remove_cur_entry = true;
-								return output;
-							},
-						}
+						},
 					},
 				};
 
