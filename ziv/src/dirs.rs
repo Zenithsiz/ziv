@@ -1,16 +1,21 @@
 //! Project directories
 
 // Imports
-use std::{
-	path::{Path, PathBuf},
-	sync::OnceLock,
+use {
+	crate::util::AppError,
+	app_error::Context,
+	directories::ProjectDirs,
+	std::{
+		path::{Path, PathBuf},
+		sync::OnceLock,
+	},
 };
 
 /// Directories
 #[derive(Debug)]
 pub struct Dirs {
-	/// Cache directory
-	cache_dir: PathBuf,
+	/// Project dirs
+	inner: ProjectDirs,
 
 	/// Thumbnail directory
 	// TODO: Use the xdg spec thumbnail directory instead of our own?
@@ -18,18 +23,20 @@ pub struct Dirs {
 }
 
 impl Dirs {
-	/// Creates new directories from a few root paths
-	pub const fn new(cache_dir: PathBuf) -> Self {
-		Self {
-			cache_dir,
+	/// Creates the directories
+	pub fn new() -> Result<Self, AppError> {
+		let inner = ProjectDirs::from("", "", "ziv").context("Unable to determine home directory")?;
+
+		Ok(Self {
+			inner,
 			thumbnails: OnceLock::new(),
-		}
+		})
 	}
 
 	/// Returns the thumbnails directory
 	pub fn thumbnails(&self) -> &Path {
 		self.thumbnails.get_or_init(|| {
-			let path = self.cache_dir.join("thumbnails");
+			let path = self.inner.cache_dir().join("thumbnails");
 			tracing::info!("Thumbnails directory: {path:?}");
 			path
 		})

@@ -34,7 +34,6 @@ use {
 	app_error::Context,
 	clap::Parser,
 	core::time::Duration,
-	directories::ProjectDirs,
 	egui::{Widget, emath::GuiRounding},
 	indexmap::IndexSet,
 	itertools::Itertools,
@@ -65,8 +64,7 @@ fn run() -> Result<(), AppError> {
 	let args = Args::parse();
 	tracing::debug!(?args, "Arguments");
 
-	let dirs = ProjectDirs::from("", "", "ziv").context("Unable to create app directories")?;
-	let dirs = Dirs::new(dirs.cache_dir().to_owned());
+	let dirs = Dirs::new().context("Unable to determine directories")?;
 	let dirs = Arc::new(dirs);
 
 	// Set logger file from arguments
