@@ -39,7 +39,13 @@ use {
 	egui::{Widget, emath::GuiRounding},
 	indexmap::IndexSet,
 	itertools::Itertools,
-	std::{ffi::OsStr, fmt::Write, path::PathBuf, process::ExitCode, sync::Arc},
+	std::{
+		ffi::OsStr,
+		fmt::Write,
+		path::{Path, PathBuf},
+		process::ExitCode,
+		sync::Arc,
+	},
 	strum::VariantArray,
 	zutil_logger::Logger,
 };
@@ -88,7 +94,7 @@ fn run() -> Result<(), AppError> {
 		"ziv",
 		native_options,
 		Box::new(|cc| {
-			let app = EguiApp::new(cc, dirs, thread_pool, path);
+			let app = EguiApp::new(cc, &config, dirs, thread_pool, path);
 			Ok(Box::new(app))
 		}),
 	)
@@ -132,7 +138,7 @@ impl DisplayMode {
 
 #[derive(Debug)]
 struct EguiApp {
-	dirs:            Arc<Dirs>,
+	_dirs:           Arc<Dirs>,
 	thread_pool:     PriorityThreadPool,
 	dir_reader:      DirReader,
 	cur_player:      Option<CurPlayer>,
@@ -143,6 +149,7 @@ struct EguiApp {
 	display_mode:    DisplayMode,
 	shortcuts:       Shortcuts,
 	entries_per_row: usize,
+	thumbnails_dir:  Arc<Path>,
 
 	/// Entries we're loaded
 	loaded_entries:     IndexSet<DirEntry>,
@@ -153,6 +160,7 @@ impl EguiApp {
 	/// Creates a new app
 	pub fn new(
 		cc: &eframe::CreationContext<'_>,
+		config: &Config,
 		dirs: Arc<Dirs>,
 		thread_pool: PriorityThreadPool,
 		path: PathBuf,
@@ -163,8 +171,13 @@ impl EguiApp {
 		});
 		dir_reader.add_allowed_extensions(["jpg", "jpeg", "png", "gif", "webp", "webm", "mkv", "mp4"]);
 
+		let thumbnails_dir = config
+			.thumbnails_cache
+			.as_deref()
+			.map_or_else(|| Arc::clone(dirs.thumbnails()), Arc::from);
+
 		Self {
-			dirs,
+			_dirs: dirs,
 			thread_pool,
 			dir_reader,
 			cur_player: None,
@@ -178,6 +191,7 @@ impl EguiApp {
 			display_mode: DisplayMode::Image,
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
+			thumbnails_dir,
 			shortcuts: Shortcuts::default(),
 			entries_per_row: 4,
 		}
@@ -869,7 +883,11 @@ impl EguiApp {
 										let image_size = egui::vec2(image_width, image_height);
 
 										ui.vertical_centered_justified(|ui| {
-											match entry.thumbnail_texture(&self.thread_pool, ui.ctx(), &self.dirs) {
+											match entry.thumbnail_texture(
+												&self.thread_pool,
+												ui.ctx(),
+												&self.thumbnails_dir,
+											) {
 												Ok(Some(image_texture)) => {
 													let image = egui::Image::from_texture(
 														egui::load::SizedTexture::from_handle(&image_texture),

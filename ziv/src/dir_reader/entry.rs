@@ -3,10 +3,7 @@
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::{
-		dirs::Dirs,
-		util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
-	},
+	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	app_error::{Context, app_error},
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::Mutex,
@@ -169,14 +166,14 @@ impl DirEntry {
 		&self,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
-		dirs: &Arc<Dirs>,
+		thumbnails_dir: &Arc<Path>,
 	) -> Result<Option<egui::TextureHandle>, AppError> {
-		#[cloned(this = self, egui_ctx, dirs)]
+		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0
 			.thumbnail_texture
 			.lock()
 			.try_load(thread_pool, Priority::LOW, move || {
-				self::load_thumbnail_texture(&this.path(), &egui_ctx, &dirs)
+				self::load_thumbnail_texture(&this.path(), &egui_ctx, &thumbnails_dir)
 			})
 			.map(Option::<&_>::cloned)
 	}
@@ -270,7 +267,11 @@ fn load_texture(path: &Path, egui_ctx: &egui::Context) -> Result<egui::TextureHa
 	Ok::<_, AppError>(texture)
 }
 
-fn load_thumbnail_texture(path: &Path, egui_ctx: &egui::Context, dirs: &Dirs) -> Result<egui::TextureHandle, AppError> {
+fn load_thumbnail_texture(
+	path: &Path,
+	egui_ctx: &egui::Context,
+	thumbnails_dir: &Path,
+) -> Result<egui::TextureHandle, AppError> {
 	let cache_path = {
 		let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
 		let path_uri = Url::from_file_path(&path_absolute)
@@ -279,7 +280,7 @@ fn load_thumbnail_texture(path: &Path, egui_ctx: &egui::Context, dirs: &Dirs) ->
 		let thumbnail_file_name = format!("{path_md5:#x}.png");
 
 		// TODO: Should we be using `png`s for the thumbnails?
-		dirs.thumbnails().join(thumbnail_file_name)
+		thumbnails_dir.join(thumbnail_file_name)
 	};
 
 	let image = match image::open(&cache_path) {
@@ -309,7 +310,7 @@ fn load_thumbnail_texture(path: &Path, egui_ctx: &egui::Context, dirs: &Dirs) ->
 					let thumbnail = image.thumbnail(256, 256);
 
 					// TODO: Make saving the thumbnail a non-fatal error
-					fs::create_dir_all(dirs.thumbnails()).context("Unable to create thumbnails directory")?;
+					fs::create_dir_all(thumbnails_dir).context("Unable to create thumbnails directory")?;
 					thumbnail.save(cache_path).context("Unable to save thumbnail")?;
 
 					thumbnail
