@@ -6,8 +6,8 @@ use {
 	app_error::Context,
 	directories::ProjectDirs,
 	std::{
-		path::{Path, PathBuf},
-		sync::OnceLock,
+		path::Path,
+		sync::{Arc, OnceLock},
 	},
 };
 
@@ -19,11 +19,11 @@ pub struct Dirs {
 
 	/// Thumbnail directory
 	// TODO: Use the xdg spec thumbnail directory instead of our own?
-	thumbnails: OnceLock<PathBuf>,
+	thumbnails: OnceLock<Arc<Path>>,
 
 	/// Config file
 	// TODO: Use the xdg spec thumbnail directory instead of our own?
-	config: OnceLock<PathBuf>,
+	config: OnceLock<Arc<Path>>,
 }
 
 impl Dirs {
@@ -39,20 +39,20 @@ impl Dirs {
 	}
 
 	/// Returns the thumbnails directory
-	pub fn thumbnails(&self) -> &Path {
+	pub fn thumbnails(&self) -> &Arc<Path> {
 		self.thumbnails.get_or_init(|| {
 			let path = self.inner.cache_dir().join("thumbnails");
 			tracing::info!("Thumbnails directory: {path:?}");
-			path
+			path.into()
 		})
 	}
 
 	/// Returns the config file
-	pub fn config(&self) -> &Path {
+	pub fn config(&self) -> &Arc<Path> {
 		self.config.get_or_init(|| {
 			let path = self.inner.config_dir().join("config.toml");
 			tracing::info!("Configuration file: {path:?}");
-			path
+			path.into()
 		})
 	}
 }
