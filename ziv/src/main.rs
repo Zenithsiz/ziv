@@ -17,6 +17,7 @@
 
 // Modules
 mod args;
+mod config;
 mod dir_reader;
 mod dirs;
 mod shortcut;
@@ -26,6 +27,7 @@ mod util;
 use {
 	self::{
 		args::Args,
+		config::Config,
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
 		dirs::Dirs,
 		shortcut::Shortcuts,
@@ -66,6 +68,11 @@ fn run() -> Result<(), AppError> {
 
 	let dirs = Dirs::new().context("Unable to determine directories")?;
 	let dirs = Arc::new(dirs);
+
+	// Get configuration
+	let config_path = args.config_file.as_deref().unwrap_or_else(|| dirs.config());
+	let config = util::config::get_or_create_with(config_path, Config::default);
+	tracing::debug!(?config, "Configuration");
 
 	// Set logger file from arguments
 	logger.set_file(args.log_file.as_deref());

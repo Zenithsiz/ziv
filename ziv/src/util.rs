@@ -1,6 +1,7 @@
 //! Utilities
 
 // Modules
+pub mod config;
 pub mod loadable;
 pub mod priority_thread_pool;
 
@@ -12,7 +13,7 @@ use {
 	app_error::Context,
 	core::cmp,
 	serde::de::DeserializeOwned,
-	std::{fs, path::Path},
+	std::{fs, io, path::Path},
 };
 
 /// Error type for the crate.
@@ -111,5 +112,14 @@ pub fn hot_reload<T: DeserializeOwned>(path: impl AsRef<Path>, default: T) -> T 
 			tracing::warn!("Unable to hot-reload value from file {path:?}: {err:?}");
 			default
 		},
+	}
+}
+
+/// Creates the parent directory of a file, if it has a parent
+pub fn create_parent(path: impl AsRef<Path>) -> Result<(), io::Error> {
+	let path = path.as_ref();
+	match path.parent() {
+		Some(parent) => fs::create_dir_all(parent),
+		None => Ok(()),
 	}
 }

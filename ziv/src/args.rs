@@ -14,6 +14,10 @@ pub struct Args {
 	#[clap(long = "log-file")]
 	pub log_file: Option<PathBuf>,
 
+	/// Configuration file to use.
+	#[clap(long = "config-file")]
+	pub config_file: Option<PathBuf>,
+
 	/// Path to open (or current if none given)
 	pub path: Option<PathBuf>,
 }
