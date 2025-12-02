@@ -138,6 +138,13 @@ impl DisplayMode {
 }
 
 #[derive(Debug)]
+struct Controls {
+	zoom_sensitivity:         f32,
+	scroll_sensitivity:       f32,
+	keyboard_pan_sensitivity: f32,
+}
+
+#[derive(Debug)]
 struct EguiApp {
 	_dirs:           Arc<Dirs>,
 	thread_pool:     PriorityThreadPool,
@@ -152,6 +159,7 @@ struct EguiApp {
 	entries_per_row: usize,
 	thumbnails_dir:  Arc<Path>,
 	video_exts:      Arc<HashSet<String>>,
+	controls:        Controls,
 
 	/// Entries we're loaded
 	loaded_entries:     IndexSet<DirEntry>,
@@ -197,6 +205,11 @@ impl EguiApp {
 			thumbnails_dir,
 			video_exts: Arc::new(config.exts.video.into_iter().collect()),
 			shortcuts: config.shortcuts,
+			controls: Controls {
+				zoom_sensitivity:         config.controls.zoom_sensitivity,
+				scroll_sensitivity:       config.controls.scroll_sensitivity,
+				keyboard_pan_sensitivity: config.controls.keyboard_pan_sensitivity,
+			},
 			entries_per_row: 4,
 		}
 	}
@@ -334,6 +347,7 @@ impl EguiApp {
 		view_mode: ViewMode,
 		window_response: &egui::Response,
 		vertical_pan: f32,
+		controls: &Controls,
 	) -> egui::Response {
 		let window_as = window_size.y / window_size.x;
 		let image_as = image_size.y / image_size.x;
@@ -440,10 +454,9 @@ impl EguiApp {
 		// Note: `translation_delta` uses both scrolling and pan gestures (on mobile, which don't include dragging,
 		//       for some reason, which is why we add it separately)
 		// TODO: Smooth the vertical pan?
-		// TODO: Make this scroll sensitivity configurable
 		let drag_delta = image_response.drag_delta() +
-			ui.input(egui::InputState::translation_delta) * 2.0 +
-			egui::vec2(0.0, vertical_pan) * window_size / 5.0;
+			ui.input(egui::InputState::translation_delta) * controls.scroll_sensitivity +
+			egui::vec2(0.0, vertical_pan) * window_size * controls.keyboard_pan_sensitivity;
 		if drag_delta != egui::Vec2::ZERO {
 			pan_zoom.offset -= drag_delta * zoom_scale * image_size / ui_size;
 		}
@@ -460,7 +473,7 @@ impl EguiApp {
 			let Some(cursor_pos) = window_response.union(image_response.clone()).hover_pos()
 		{
 			// TODO: Make this sensitivity configurable
-			pan_zoom.zoom += (scroll_delta - 1.0) * 200.0;
+			pan_zoom.zoom += (scroll_delta - 1.0) * controls.zoom_sensitivity;
 
 			// Cap our zoom to not view outside the window
 			let max_zoom_scale = egui::Vec2::ONE / window_ui_scale;
@@ -565,6 +578,7 @@ impl EguiApp {
 					self.view_mode,
 					input.window_response,
 					input.vertical_pan,
+					&self.controls,
 				));
 
 				player.player.render_controls(ui, input.window_response);
@@ -667,6 +681,7 @@ impl EguiApp {
 					self.view_mode,
 					input.window_response,
 					input.vertical_pan,
+					&self.controls,
 				));
 
 				if !input.entry.has_image_details() {

@@ -14,11 +14,16 @@ quit                    = "Q"
 toggle_display_mode     = "Backspace"
 
 [shortcuts.sort]
+FileName         = "F1"
 ModificationDate = "F2"
 Size             = "F3"
-FileName         = "F1"
 
 [shortcuts.view_modes]
+FitWindow  = "Num1"
 FitWidth   = "Num2"
 ActualSize = "Num3"
-FitWindow  = "Num1"
+
+[controls]
+zoom_sensitivity         = 200.0
+scroll_sensitivity       = 2.0
+keyboard_pan_sensitivity = 0.2
