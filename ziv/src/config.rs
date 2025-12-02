@@ -1,7 +1,7 @@
 //! Configuration
 
 // Imports
-use std::path::PathBuf;
+use {crate::shortcut::Shortcuts, std::path::PathBuf};
 
 /// Configuration
 #[derive(Clone, Debug)]
@@ -13,6 +13,9 @@ pub struct Config {
 
 	/// Extensions
 	pub exts: Exts,
+
+	/// Shortcuts
+	pub shortcuts: Shortcuts,
 }
 
 /// Extensions
@@ -36,6 +39,7 @@ impl Default for Config {
 				image: DEFAULT_IMAGE_EXTS.iter().copied().map(String::from).collect(),
 				video: DEFAULT_VIDEO_EXTS.iter().copied().map(String::from).collect(),
 			},
+			shortcuts:        Shortcuts::default(),
 		}
 	}
 }

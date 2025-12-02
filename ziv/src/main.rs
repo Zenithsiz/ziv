@@ -196,7 +196,7 @@ impl EguiApp {
 			max_loaded_entries: 5,
 			thumbnails_dir,
 			video_exts: Arc::new(config.exts.video.into_iter().collect()),
-			shortcuts: Shortcuts::default(),
+			shortcuts: config.shortcuts,
 			entries_per_row: 4,
 		}
 	}

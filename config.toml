@@ -1,3 +1,24 @@
 [exts]
 image = ["jpg", "jpeg", "png", "webp"]
 video = ["gif", "mkv", "mp4", "webm"]
+
+[shortcuts]
+prev                    = "ArrowLeft"
+next                    = "ArrowRight"
+first                   = "Home"
+last                    = "End"
+fullscreen              = "F"
+exit_fullscreen_or_quit = "Escape"
+toggle_pause            = "Space"
+quit                    = "Q"
+toggle_display_mode     = "Backspace"
+
+[shortcuts.sort]
+ModificationDate = "F2"
+Size             = "F3"
+FileName         = "F1"
+
+[shortcuts.view_modes]
+FitWidth   = "Num2"
+ActualSize = "Num3"
+FitWindow  = "Num1"

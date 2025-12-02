@@ -7,7 +7,7 @@ use {
 };
 
 /// Shortcut keys
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Shortcuts {
 	pub prev: egui::Key,
