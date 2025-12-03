@@ -707,7 +707,14 @@ impl EguiApp {
 
 			// TODO: Make these configurable?
 			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-				vertical_pan += 1.0;
+				let is_default_view_mode = self.view_mode == ViewMode::FitWindow &&
+					self.pan_zoom.offset == egui::Vec2::ZERO &&
+					self.pan_zoom.zoom == 0.0;
+
+				match is_default_view_mode {
+					true => self.view_mode = ViewMode::FitWidth,
+					false => vertical_pan += 1.0,
+				}
 			}
 			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
 				vertical_pan -= 1.0;
