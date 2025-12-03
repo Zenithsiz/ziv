@@ -520,6 +520,12 @@ impl EguiApp {
 			resize_size:    None,
 		};
 
+		let vertical_pan = self.vertical_pan_smooth * self.controls.keyboard_pan_smooth;
+		self.vertical_pan_smooth -= vertical_pan;
+		if self.vertical_pan_smooth.abs() < 1e-5 {
+			self.vertical_pan_smooth = 0.0;
+		}
+
 		let entry_path = input.entry.path();
 		match entry_path
 			.extension()
@@ -563,7 +569,7 @@ impl EguiApp {
 					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
-					input.vertical_pan,
+					vertical_pan,
 					&self.controls,
 				));
 
@@ -640,7 +646,7 @@ impl EguiApp {
 					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
-					input.vertical_pan,
+					vertical_pan,
 					&self.controls,
 				));
 
@@ -739,16 +745,10 @@ impl EguiApp {
 				egui::Sense::all(),
 			);
 
-			let vertical_pan = self.vertical_pan_smooth * self.controls.keyboard_pan_smooth;
-			self.vertical_pan_smooth -= vertical_pan;
-			if self.vertical_pan_smooth.abs() < 1e-5 {
-				self.vertical_pan_smooth = 0.0;
-			}
 
 			let draw_input = DrawInput {
-				entry: &cur_entry,
+				entry:           &cur_entry,
 				window_response: &window_response,
-				vertical_pan,
 			};
 			let mut draw_output = self.draw_entry(ui, draw_input);
 			let response = match draw_output.image_response.take() {
@@ -1055,7 +1055,6 @@ macro write_str(
 struct DrawInput<'a> {
 	entry:           &'a CurEntry,
 	window_response: &'a egui::Response,
-	vertical_pan:    f32,
 }
 
 #[derive(Clone, Debug)]
