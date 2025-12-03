@@ -516,9 +516,8 @@ impl EguiApp {
 	/// Draws an entry
 	fn draw_entry(&mut self, ui: &mut egui::Ui, input: DrawInput) -> DrawOutput {
 		let mut output = DrawOutput {
-			image_response:   None,
-			resize_size:      None,
-			remove_cur_entry: false,
+			image_response: None,
+			resize_size:    None,
 		};
 
 		let entry_path = input.entry.path();
@@ -541,7 +540,7 @@ impl EguiApp {
 						},
 						Err(err) => {
 							tracing::warn!("{:?}", err.context("Unable to create video player"));
-							output.remove_cur_entry = true;
+							self.dir_reader.remove(input.entry);
 							return output;
 						},
 					},
@@ -803,10 +802,6 @@ impl EguiApp {
 		// TODO: Don't change the title each frame?
 		ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title(&cur_entry)));
 
-		if draw_output.remove_cur_entry {
-			self.dir_reader.cur_entry_remove();
-		}
-
 		// TODO: Don't duplicate this by returning the fact that we want to fullscreen instead
 		// TODO: Also allow double-clicking an empty part in the display list to fullscreen
 		let is_fullscreen = ctx.input(|input| input.viewport().fullscreen).unwrap_or(false);
@@ -1067,9 +1062,8 @@ struct DrawInput<'a> {
 
 #[derive(Clone, Debug)]
 struct DrawOutput {
-	image_response:   Option<egui::Response>,
-	resize_size:      Option<egui::Vec2>,
-	remove_cur_entry: bool,
+	image_response: Option<egui::Response>,
+	resize_size:    Option<egui::Vec2>,
 }
 
 #[derive(Clone, Copy, Debug)]
