@@ -618,28 +618,9 @@ impl EguiApp {
 					return output;
 				};
 
-				let image = egui::Image::from_texture(image)
-					.show_loading_spinner(false)
-					.sense(egui::Sense::click());
+				let image_size = image.size();
 
-				let load_res = image.load_for_size(ui.ctx(), egui::Vec2::INFINITY);
-				let image_size = match load_res {
-					Ok(tex) => match tex.size() {
-						// TODO: We can have a size even while not loaded, should we still continue?
-						Some(size) => size,
-						None => {
-							ui.centered_and_justified(|ui| {
-								ui.weak("Loading...");
-							});
-							return output;
-						},
-					},
-					Err(err) => {
-						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
-						self.dir_reader.cur_entry_remove();
-						return output;
-					},
-				};
+				let image = egui::Image::from_texture(image).sense(egui::Sense::click());
 
 				output.image_size = Some(image_size);
 

@@ -121,6 +121,11 @@ impl EntryImage {
 
 		Ok(Self { handle })
 	}
+
+	/// Returns the size of this image
+	pub fn size(&self) -> egui::Vec2 {
+		self.handle.size_vec2()
+	}
 }
 
 impl core::fmt::Debug for EntryImage {
