@@ -1,10 +1,16 @@
 //! Directory entry
 
+// Modules
+pub mod image;
+
+// Exports
+pub use self::image::EntryImage;
+
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
 	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
-	app_error::{Context, app_error},
+	app_error::Context,
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::Mutex,
 	std::{
@@ -15,7 +21,6 @@ use {
 		sync::Arc,
 		time::SystemTime,
 	},
-	url::Url,
 	zutil_cloned::cloned,
 };
 
@@ -28,9 +33,9 @@ struct Inner {
 	metadata:          Mutex<Loadable<Arc<Metadata>>>,
 	modified_date:     Mutex<Loadable<SystemTime>>,
 	#[debug(ignore)]
-	texture:           Mutex<Loadable<egui::TextureHandle>>,
+	texture:           Mutex<Loadable<EntryImage>>,
 	#[debug(ignore)]
-	thumbnail_texture: Mutex<Loadable<egui::TextureHandle>>,
+	thumbnail_texture: Mutex<Loadable<EntryImage>>,
 	image_details:     Mutex<Option<ImageDetails>>,
 }
 
@@ -142,13 +147,13 @@ impl DirEntry {
 		&self,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
-	) -> Result<Option<egui::TextureHandle>, AppError> {
+	) -> Result<Option<EntryImage>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0
 			.texture
 			.lock()
 			.try_load(thread_pool, Priority::HIGH, move || {
-				self::load_texture(&this.path(), &egui_ctx)
+				EntryImage::new(&egui_ctx, &this.path())
 			})
 			.map(Option::<&_>::cloned)
 	}
@@ -165,13 +170,13 @@ impl DirEntry {
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Arc<Path>,
 		video_exts: &Arc<HashSet<String>>,
-	) -> Result<Option<egui::TextureHandle>, AppError> {
+	) -> Result<Option<EntryImage>, AppError> {
 		#[cloned(this = self, egui_ctx, thumbnails_dir, video_exts)]
 		self.0
 			.thumbnail_texture
 			.lock()
 			.try_load(thread_pool, Priority::LOW, move || {
-				self::load_thumbnail_texture(&this.path(), &egui_ctx, &thumbnails_dir, &video_exts)
+				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &video_exts, &this.path())
 			})
 			.map(Option::<&_>::cloned)
 	}
@@ -253,110 +258,4 @@ pub enum ImageDetails {
 fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
 	let metadata = fs::metadata(path).context("Unable to get metadata")?;
 	Ok(Arc::new(metadata))
-}
-
-fn load_texture(path: &Path, egui_ctx: &egui::Context) -> Result<egui::TextureHandle, AppError> {
-	let mut image = image::open(path).context("Unable to read image")?;
-
-	// Resize the image if it's too big for the gpu
-	// Note: If the max texture size doesn't fit into a `u32`, then we can be sure
-	//       that any image passed will fit.
-	// TODO: Instead of decreasing the image size, can we just split into multiple images?
-	let max_texture_size = egui_ctx.input(|input| input.max_texture_side);
-	if let Ok(max_texture_size) = u32::try_from(max_texture_size) &&
-		(image.width() > max_texture_size || image.height() > max_texture_size)
-	{
-		tracing::warn!(
-			"Image size {}x{} did not fit into gpu's max texture size, resizing to fit \
-			 {max_texture_size}x{max_texture_size}",
-			image.width(),
-			image.height()
-		);
-		image = image.resize(
-			max_texture_size,
-			max_texture_size,
-			image::imageops::FilterType::Triangle,
-		);
-	}
-
-	let image = egui::ColorImage::from_rgba_unmultiplied(
-		[image.width() as usize, image.height() as usize],
-		&image.into_rgba8().into_flat_samples().samples,
-	);
-	let image = egui::ImageData::Color(Arc::new(image));
-
-	// TODO: This filter should be customizable.
-	let options = egui::TextureOptions::LINEAR;
-	// TODO: Could we make it so we don't require an egui context here?
-	let texture = egui_ctx.load_texture(path.display().to_string(), image, options);
-
-	Ok::<_, AppError>(texture)
-}
-
-fn load_thumbnail_texture(
-	path: &Path,
-	egui_ctx: &egui::Context,
-	thumbnails_dir: &Path,
-	video_exts: &HashSet<String>,
-) -> Result<egui::TextureHandle, AppError> {
-	let cache_path = {
-		let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
-		let path_uri = Url::from_file_path(&path_absolute)
-			.map_err(|()| app_error!("Unable to turn path into url: {path_absolute:?}"))?;
-		let path_md5 = md5::compute(path_uri.as_str());
-		let thumbnail_file_name = format!("{path_md5:#x}.png");
-
-		// TODO: Should we be using `png`s for the thumbnails?
-		thumbnails_dir.join(thumbnail_file_name)
-	};
-
-	let image = match image::open(&cache_path) {
-		Ok(image) => image,
-		Err(err) => {
-			// Note: `image` supports gifs, so we can still generate thumbnails for them
-			let is_video = path
-				.extension()
-				.and_then(OsStr::to_str)
-				.is_some_and(|ext| ext != "gif" && video_exts.contains(ext));
-
-			match is_video {
-				true => {
-					tracing::debug!(
-						?path,
-						?cache_path,
-						?err,
-						"No thumbnail found, but path was a video, so skipping thumbnail"
-					);
-
-					// TODO: Implement video thumbnails
-					image::DynamicImage::new_rgba8(256, 256)
-				},
-				false => {
-					tracing::debug!(?path, ?cache_path, ?err, "No thumbnail found, generating one");
-					let image = image::open(path).context("Unable to read image")?;
-					let thumbnail = image.thumbnail(256, 256);
-
-					// TODO: Make saving the thumbnail a non-fatal error
-					fs::create_dir_all(thumbnails_dir).context("Unable to create thumbnails directory")?;
-					thumbnail.save(cache_path).context("Unable to save thumbnail")?;
-
-					thumbnail
-				},
-			}
-		},
-	};
-
-
-	let image = egui::ColorImage::from_rgba_unmultiplied(
-		[image.width() as usize, image.height() as usize],
-		&image.into_rgba8().into_flat_samples().samples,
-	);
-	let image = egui::ImageData::Color(Arc::new(image));
-
-	// TODO: This filter should be customizable.
-	let options = egui::TextureOptions::LINEAR;
-	// TODO: Could we make it so we don't require an egui context here?
-	let texture = egui_ctx.load_texture(path.display().to_string(), image, options);
-
-	Ok::<_, AppError>(texture)
 }

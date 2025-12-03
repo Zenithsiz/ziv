@@ -605,7 +605,7 @@ impl EguiApp {
 				//       `entry.remove_texture`, otherwise the texture would be
 				//       "leaked" (as-in, it would be outside `loaded_entries`
 				//       while being loaded)
-				let image_texture = match input.entry.texture(&self.thread_pool, ui.ctx()) {
+				let image = match input.entry.texture(&self.thread_pool, ui.ctx()) {
 					Ok(texture) => texture,
 					Err(err) => {
 						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
@@ -615,14 +615,14 @@ impl EguiApp {
 				};
 
 				self.loaded_entries.insert(input.entry.clone().into());
-				let Some(image_texture) = image_texture else {
+				let Some(image) = image else {
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
 					});
 					return output;
 				};
 
-				let image = egui::Image::from_texture(egui::load::SizedTexture::from_handle(&image_texture))
+				let image = egui::Image::from_texture(image)
 					.show_loading_spinner(false)
 					.sense(egui::Sense::click());
 
@@ -921,13 +921,11 @@ impl EguiApp {
 												&self.thumbnails_dir,
 												&self.video_exts,
 											) {
-												Ok(Some(image_texture)) => {
-													let image = egui::Image::from_texture(
-														egui::load::SizedTexture::from_handle(&image_texture),
-													)
-													.fit_to_exact_size(image_size)
-													.show_loading_spinner(false)
-													.sense(egui::Sense::click());
+												Ok(Some(image)) => {
+													let image = egui::Image::from_texture(image)
+														.fit_to_exact_size(image_size)
+														.show_loading_spinner(false)
+														.sense(egui::Sense::click());
 
 													if ui.add(image).double_clicked() {
 														goto_entry = Some(entry.clone());
