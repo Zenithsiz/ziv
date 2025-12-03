@@ -546,14 +546,6 @@ impl EguiApp {
 					},
 				};
 
-				if input.toggle_pause {
-					match player.player.player_state.get() {
-						egui_video::PlayerState::Paused => player.player.resume(),
-						egui_video::PlayerState::Playing => player.player.pause(),
-						_ => (),
-					}
-				}
-
 				let image_size = player.player.size;
 
 				let image = player
@@ -706,6 +698,14 @@ impl EguiApp {
 			}
 		});
 
+		if toggle_pause && let Some(player) = &mut self.cur_player {
+			match player.player.player_state.get() {
+				egui_video::PlayerState::Paused => player.player.resume(),
+				egui_video::PlayerState::Playing => player.player.pause(),
+				_ => (),
+			}
+		}
+
 		let Some(mut cur_entry) = self.dir_reader.cur_entry() else {
 			return;
 		};
@@ -746,7 +746,6 @@ impl EguiApp {
 			}
 
 			let draw_input = DrawInput {
-				toggle_pause,
 				entry: &cur_entry,
 				window_response: &window_response,
 				vertical_pan,
@@ -1056,7 +1055,6 @@ macro write_str(
 struct DrawInput<'a> {
 	entry:           &'a CurEntry,
 	window_response: &'a egui::Response,
-	toggle_pause:    bool,
 	vertical_pan:    f32,
 }
 
