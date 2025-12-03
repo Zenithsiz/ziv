@@ -601,10 +601,6 @@ impl EguiApp {
 				// Note: It's important we check the loaded textures *before*
 				//       returning, else we could accumulate a bunch of loading
 				//       textures
-				// Note: It's important we call `entry.texture` before
-				//       `entry.remove_texture`, otherwise the texture would be
-				//       "leaked" (as-in, it would be outside `loaded_entries`
-				//       while being loaded)
 				let image = match input.entry.texture(&self.thread_pool, ui.ctx()) {
 					Ok(texture) => texture,
 					Err(err) => {
