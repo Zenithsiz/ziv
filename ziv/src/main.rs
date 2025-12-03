@@ -516,7 +516,7 @@ impl EguiApp {
 	/// Draws an entry
 	fn draw_entry(&mut self, ui: &mut egui::Ui, input: DrawInput) -> DrawOutput {
 		let mut output = DrawOutput {
-			window_response:  None,
+			image_response:   None,
 			resize_size:      None,
 			remove_cur_entry: false,
 		};
@@ -564,7 +564,7 @@ impl EguiApp {
 					.fit_to_exact_size(ui.available_size());
 
 				let window_size = ui.available_size().round_ui();
-				output.window_response = Some(Self::draw_image(
+				output.image_response = Some(Self::draw_image(
 					ui,
 					image,
 					image_size,
@@ -641,7 +641,7 @@ impl EguiApp {
 					},
 				};
 
-				output.window_response = Some(Self::draw_image(
+				output.image_response = Some(Self::draw_image(
 					ui,
 					image,
 					image_size,
@@ -753,7 +753,7 @@ impl EguiApp {
 				vertical_pan,
 			};
 			let mut draw_output = self.draw_entry(ui, draw_input);
-			let response = match draw_output.window_response.take() {
+			let response = match draw_output.image_response.take() {
 				Some(response) => response.union(window_response),
 				None => window_response,
 			};
@@ -1067,7 +1067,7 @@ struct DrawInput<'a> {
 
 #[derive(Clone, Debug)]
 struct DrawOutput {
-	window_response:  Option<egui::Response>,
+	image_response:   Option<egui::Response>,
 	resize_size:      Option<egui::Vec2>,
 	remove_cur_entry: bool,
 }
