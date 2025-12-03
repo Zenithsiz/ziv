@@ -305,16 +305,17 @@ impl EguiApp {
 
 	/// Draws the info window
 	fn draw_info_window(&self, ctx: &egui::Context, cur_entry: Option<&CurEntry>) {
-		egui::Window::new("Path")
+		egui::Window::new("info-window")
 			.title_bar(false)
 			.resizable(false)
+			.min_size(egui::Vec2::INFINITY)
+			.max_size(egui::Vec2::INFINITY)
 			.frame(egui::Frame {
 				inner_margin: egui::Margin::symmetric(1, 1),
 				fill: egui::Color32::from_rgba_premultiplied(0, 0, 0, 128),
 				..egui::Frame::NONE
 			})
 			.anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
-			.default_width(ctx.available_rect().width())
 			.show(ctx, |ui| {
 				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
 
