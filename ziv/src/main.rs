@@ -517,7 +517,6 @@ impl EguiApp {
 	fn draw_entry(&mut self, ui: &mut egui::Ui, input: DrawInput) -> DrawOutput {
 		let mut output = DrawOutput {
 			window_response:  None,
-			image_size:       None,
 			resize_size:      None,
 			remove_cur_entry: false,
 		};
@@ -556,7 +555,6 @@ impl EguiApp {
 					}
 				}
 
-				output.image_size = Some(player.player.size);
 				let image_size = player.player.size;
 
 				let image = player
@@ -619,10 +617,7 @@ impl EguiApp {
 				};
 
 				let image_size = image.size();
-
 				let image = egui::Image::from_texture(image).sense(egui::Sense::click());
-
-				output.image_size = Some(image_size);
 
 				// Note: If we're in fullscreen, we shouldn't resize yet.
 				//       If we did, the user might notice a flicker, because
@@ -1073,7 +1068,6 @@ struct DrawInput<'a> {
 #[derive(Clone, Debug)]
 struct DrawOutput {
 	window_response:  Option<egui::Response>,
-	image_size:       Option<egui::Vec2>,
 	resize_size:      Option<egui::Vec2>,
 	remove_cur_entry: bool,
 }
