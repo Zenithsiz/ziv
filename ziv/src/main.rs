@@ -142,24 +142,26 @@ struct Controls {
 	zoom_sensitivity:         f32,
 	scroll_sensitivity:       f32,
 	keyboard_pan_sensitivity: f32,
+	keyboard_pan_smooth:      f32,
 }
 
 #[derive(Debug)]
 struct EguiApp {
-	_dirs:           Arc<Dirs>,
-	thread_pool:     PriorityThreadPool,
-	dir_reader:      DirReader,
-	cur_player:      Option<CurPlayer>,
-	next_frame_idx:  usize,
-	pan_zoom:        PanZoom,
-	resized_image:   bool,
-	view_mode:       ViewMode,
-	display_mode:    DisplayMode,
-	shortcuts:       Shortcuts,
-	entries_per_row: usize,
-	thumbnails_dir:  Arc<Path>,
-	video_exts:      Arc<HashSet<String>>,
-	controls:        Controls,
+	_dirs:               Arc<Dirs>,
+	thread_pool:         PriorityThreadPool,
+	dir_reader:          DirReader,
+	cur_player:          Option<CurPlayer>,
+	next_frame_idx:      usize,
+	pan_zoom:            PanZoom,
+	resized_image:       bool,
+	view_mode:           ViewMode,
+	display_mode:        DisplayMode,
+	shortcuts:           Shortcuts,
+	entries_per_row:     usize,
+	thumbnails_dir:      Arc<Path>,
+	video_exts:          Arc<HashSet<String>>,
+	controls:            Controls,
+	vertical_pan_smooth: f32,
 
 	/// Entries we're loaded
 	loaded_entries:     IndexSet<DirEntry>,
@@ -209,7 +211,9 @@ impl EguiApp {
 				zoom_sensitivity:         config.controls.zoom_sensitivity,
 				scroll_sensitivity:       config.controls.scroll_sensitivity,
 				keyboard_pan_sensitivity: config.controls.keyboard_pan_sensitivity,
+				keyboard_pan_smooth:      config.controls.keyboard_pan_smooth,
 			},
+			vertical_pan_smooth: 0.0,
 			entries_per_row: 4,
 		}
 	}
@@ -453,7 +457,6 @@ impl EguiApp {
 		// When dragging or scrolling, handle panning
 		// Note: `translation_delta` uses both scrolling and pan gestures (on mobile, which don't include dragging,
 		//       for some reason, which is why we add it separately)
-		// TODO: Smooth the vertical pan?
 		let drag_delta = image_response.drag_delta() +
 			ui.input(egui::InputState::translation_delta) * controls.scroll_sensitivity +
 			egui::vec2(0.0, vertical_pan) * window_size * controls.keyboard_pan_sensitivity;
@@ -693,7 +696,6 @@ impl EguiApp {
 		let mut move_first = false;
 		let mut move_last = false;
 		let mut toggle_pause = false;
-		let mut vertical_pan = 0.0;
 		ctx.input_mut(|input| {
 			fullscreen = input.pointer.button_double_clicked(egui::PointerButton::Primary);
 
@@ -713,11 +715,11 @@ impl EguiApp {
 
 				match is_default_view_mode {
 					true => self.view_mode = ViewMode::FitWidth,
-					false => vertical_pan += 1.0,
+					false => self.vertical_pan_smooth += 1.0,
 				}
 			}
 			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-				vertical_pan -= 1.0;
+				self.vertical_pan_smooth -= 1.0;
 			}
 
 
@@ -764,6 +766,12 @@ impl EguiApp {
 				egui::Id::new("whole-screen"),
 				egui::Sense::all(),
 			);
+
+			let vertical_pan = self.vertical_pan_smooth * self.controls.keyboard_pan_smooth;
+			self.vertical_pan_smooth -= vertical_pan;
+			if self.vertical_pan_smooth.abs() < 1e-5 {
+				self.vertical_pan_smooth = 0.0;
+			}
 
 			let draw_input = DrawInput {
 				toggle_pause,

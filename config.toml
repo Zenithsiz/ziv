@@ -27,3 +27,4 @@ ActualSize = "Num3"
 zoom_sensitivity         = 200.0
 scroll_sensitivity       = 2.0
 keyboard_pan_sensitivity = 0.2
+keyboard_pan_smooth      = 0.25

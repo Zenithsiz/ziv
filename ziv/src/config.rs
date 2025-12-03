@@ -46,6 +46,9 @@ pub struct Controls {
 
 	/// Keyboard pan sensitivity
 	pub keyboard_pan_sensitivity: f32,
+
+	/// Keyboard pan smooth
+	pub keyboard_pan_smooth: f32,
 }
 
 impl Default for Config {
@@ -61,6 +64,7 @@ impl Default for Config {
 				zoom_sensitivity:         200.0,
 				scroll_sensitivity:       2.0,
 				keyboard_pan_sensitivity: 0.2,
+				keyboard_pan_smooth:      0.25,
 			},
 		}
 	}
