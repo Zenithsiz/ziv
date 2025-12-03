@@ -256,7 +256,28 @@ fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
 }
 
 fn load_texture(path: &Path, egui_ctx: &egui::Context) -> Result<egui::TextureHandle, AppError> {
-	let image = image::open(path).context("Unable to read image")?;
+	let mut image = image::open(path).context("Unable to read image")?;
+
+	// Resize the image if it's too big for the gpu
+	// Note: If the max texture size doesn't fit into a `u32`, then we can be sure
+	//       that any image passed will fit.
+	// TODO: Instead of decreasing the image size, can we just split into multiple images?
+	let max_texture_size = egui_ctx.input(|input| input.max_texture_side);
+	if let Ok(max_texture_size) = u32::try_from(max_texture_size) &&
+		(image.width() > max_texture_size || image.height() > max_texture_size)
+	{
+		tracing::warn!(
+			"Image size {}x{} did not fit into gpu's max texture size, resizing to fit \
+			 {max_texture_size}x{max_texture_size}",
+			image.width(),
+			image.height()
+		);
+		image = image.resize(
+			max_texture_size,
+			max_texture_size,
+			image::imageops::FilterType::Triangle,
+		);
+	}
 
 	let image = egui::ColorImage::from_rgba_unmultiplied(
 		[image.width() as usize, image.height() as usize],

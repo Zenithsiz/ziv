@@ -4,6 +4,7 @@
 		"egui",
 		"emath",
 		"humansize",
+		"imageops",
 		"indexmap",
 		"natord",
 		"walkdir",
