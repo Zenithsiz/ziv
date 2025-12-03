@@ -3,7 +3,6 @@
 use {
 	super::AppError,
 	app_error::Context,
-	core::mem,
 	parking_lot::{Condvar, Mutex},
 	std::{collections::BinaryHeap, sync::Arc, thread},
 	zutil_cloned::cloned,
@@ -23,7 +22,6 @@ impl PriorityThreadPool {
 			state:   Mutex::new(StateMut {
 				tasks:    BinaryHeap::new(),
 				finished: false,
-				threads:  vec![],
 			}),
 			condvar: Condvar::new(),
 		});
@@ -37,12 +35,10 @@ impl PriorityThreadPool {
 
 		for thread_idx in 0..thread_count {
 			#[cloned(inner)]
-			let thread = thread::Builder::new()
+			let _ = thread::Builder::new()
 				.name(format!("worker${thread_idx}"))
 				.spawn(move || Self::worker(&inner))
 				.context("Unable to spawn thread")?;
-
-			inner.state.lock().threads.push(thread);
 		}
 
 		Ok(Self { inner })
@@ -92,17 +88,8 @@ impl Drop for PriorityThreadPool {
 		// Set as finished and take the threads so we can join them
 		let mut state = self.inner.state.lock();
 		state.finished = true;
-		let threads = mem::take(&mut state.threads);
 		drop(state);
-
-		// Then notify all workers to quit and wait for them.
-		// TODO: Should we skip waiting for them?
 		self.inner.condvar.notify_all();
-		for thread in threads {
-			if let Err(err) = thread.join() {
-				tracing::error!("Thread panicked: {err:?}");
-			}
-		}
 	}
 }
 
@@ -113,9 +100,6 @@ struct StateMut {
 
 	/// If finished
 	finished: bool,
-
-	/// All threads
-	threads: Vec<thread::JoinHandle<()>>,
 }
 
 /// Inner state
