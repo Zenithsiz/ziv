@@ -30,7 +30,7 @@ use {
 		config::Config,
 		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
 		dirs::Dirs,
-		shortcut::Shortcuts,
+		shortcut::{Shortcuts, eguiInputStateExt},
 		util::{AppError, PriorityThreadPool, RectUtils},
 	},
 	app_error::Context,
@@ -669,13 +669,13 @@ impl EguiApp {
 		ctx.input_mut(|input| {
 			fullscreen = input.pointer.button_double_clicked(egui::PointerButton::Primary);
 
-			move_prev = input.consume_key(egui::Modifiers::NONE, self.shortcuts.prev);
-			move_next = input.consume_key(egui::Modifiers::NONE, self.shortcuts.next);
+			move_prev = input.consume_shortcut_key(self.shortcuts.prev);
+			move_next = input.consume_shortcut_key(self.shortcuts.next);
 
-			move_first = input.consume_key(egui::Modifiers::NONE, self.shortcuts.first);
-			move_last = input.consume_key(egui::Modifiers::NONE, self.shortcuts.last);
+			move_first = input.consume_shortcut_key(self.shortcuts.first);
+			move_last = input.consume_shortcut_key(self.shortcuts.last);
 
-			toggle_pause = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_pause);
+			toggle_pause = input.consume_shortcut_key(self.shortcuts.toggle_pause);
 
 			// Note: The order is important here, because by default `pan_up` and `fit_width_if_default`
 			//       use the same key, so if we consumed it here before checking whether it's
@@ -683,20 +683,20 @@ impl EguiApp {
 			let is_default_view_mode = self.view_mode == ViewMode::FitWindow &&
 				self.pan_zoom.offset == egui::Vec2::ZERO &&
 				self.pan_zoom.zoom == 0.0;
-			if is_default_view_mode && input.consume_key(egui::Modifiers::NONE, self.shortcuts.fit_width_if_default) {
+			if is_default_view_mode && input.consume_shortcut_key(self.shortcuts.fit_width_if_default) {
 				self.view_mode = ViewMode::FitWidth;
 			}
 
-			if input.consume_key(egui::Modifiers::NONE, self.shortcuts.pan_up) {
+			if input.consume_shortcut_key(self.shortcuts.pan_up) {
 				self.vertical_pan_smooth += 1.0;
 			}
-			if input.consume_key(egui::Modifiers::NONE, self.shortcuts.pan_down) {
+			if input.consume_shortcut_key(self.shortcuts.pan_down) {
 				self.vertical_pan_smooth -= 1.0;
 			}
 
 
 			for (&view_mode, &key) in &self.shortcuts.view_modes {
-				if input.consume_key(egui::Modifiers::NONE, key) {
+				if input.consume_shortcut_key(key) {
 					self.view_mode = view_mode;
 					self.pan_zoom = PanZoom {
 						offset: egui::Vec2::ZERO,
@@ -971,16 +971,16 @@ impl eframe::App for EguiApp {
 		let mut toggle_display_mode = false;
 		let mut set_sort_order = None;
 		ctx.input_mut(|input| {
-			fullscreen = input.consume_key(egui::Modifiers::NONE, self.shortcuts.fullscreen);
+			fullscreen = input.consume_shortcut_key(self.shortcuts.fullscreen);
 
-			exit_fullscreen_or_quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.exit_fullscreen_or_quit);
+			exit_fullscreen_or_quit = input.consume_shortcut_key(self.shortcuts.exit_fullscreen_or_quit);
 
-			quit = input.consume_key(egui::Modifiers::NONE, self.shortcuts.quit);
+			quit = input.consume_shortcut_key(self.shortcuts.quit);
 
-			toggle_display_mode = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_display_mode);
+			toggle_display_mode = input.consume_shortcut_key(self.shortcuts.toggle_display_mode);
 
 			for (&kind, &key) in &self.shortcuts.sort {
-				if input.consume_key(egui::Modifiers::NONE, key) {
+				if input.consume_shortcut_key(key) {
 					let mut sort_order = self.dir_reader.sort_order();
 					match sort_order.kind == kind {
 						true => sort_order.reverse ^= true,
