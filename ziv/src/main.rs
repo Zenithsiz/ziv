@@ -95,7 +95,7 @@ fn run() -> Result<(), AppError> {
 		"ziv",
 		native_options,
 		Box::new(|cc| {
-			let app = EguiApp::new(cc, config, dirs, thread_pool, path);
+			let app = EguiApp::new(cc, config, dirs, thread_pool, path).map_err(AppError::into_std_error)?;
 			Ok(Box::new(app))
 		}),
 	)
@@ -176,8 +176,8 @@ impl EguiApp {
 		dirs: Arc<Dirs>,
 		thread_pool: PriorityThreadPool,
 		path: PathBuf,
-	) -> Self {
-		let dir_reader = DirReader::new(path);
+	) -> Result<Self, AppError> {
+		let dir_reader = DirReader::new(path).context("Unable to create directory reader")?;
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
@@ -189,7 +189,7 @@ impl EguiApp {
 			.as_deref()
 			.map_or_else(|| Arc::clone(dirs.thumbnails()), Arc::from);
 
-		Self {
+		Ok(Self {
 			_dirs: dirs,
 			thread_pool,
 			dir_reader,
@@ -215,7 +215,7 @@ impl EguiApp {
 			},
 			vertical_pan_smooth: 0.0,
 			entries_per_row: 4,
-		}
+		})
 	}
 
 	fn reset_on_change_entry(&mut self, new_entry: &CurEntry) {

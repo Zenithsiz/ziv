@@ -61,7 +61,7 @@ pub struct DirReader {
 impl DirReader {
 	/// Creates a new directory reader
 	// TODO: Not need to drill the egui context through here?
-	pub fn new(path: PathBuf) -> Self {
+	pub fn new(path: PathBuf) -> Result<Self, AppError> {
 		let inner = Arc::new(Mutex::new(Inner {
 			sort_order:         SortOrder {
 				reverse: false,
@@ -75,26 +75,32 @@ impl DirReader {
 		}));
 
 		#[cloned(inner)]
-		let read_thread = thread::spawn(move || {
-			if let Err(err) = Self::read(&inner, &path) {
-				tracing::error!("Unable to read directory {path:?}: {err:?}");
-			}
-			tracing::info!("Reader thread finished");
-		});
+		let read_thread = thread::Builder::new()
+			.name("read".to_owned())
+			.spawn(move || {
+				if let Err(err) = Self::read(&inner, &path) {
+					tracing::error!("Unable to read directory {path:?}: {err:?}");
+				}
+				tracing::info!("Reader thread finished");
+			})
+			.context("Unable to spawn read thread")?;
 
 		let (sort_thread_tx, sort_thread_rx) = mpsc::channel();
 		#[cloned(inner)]
-		let sort_thread = thread::spawn(move || {
-			Self::set_sort_order_inner(&inner, &sort_thread_rx);
-			tracing::warn!("Sorting thread returned");
-		});
+		let sort_thread = thread::Builder::new()
+			.name("sort".to_owned())
+			.spawn(move || {
+				Self::set_sort_order_inner(&inner, &sort_thread_rx);
+				tracing::warn!("Sorting thread returned");
+			})
+			.context("Unable to spawn read thread")?;
 
-		Self {
+		Ok(Self {
 			inner,
 			_read_thread: read_thread,
 			_sort_thread: sort_thread,
 			sort_thread_tx,
-		}
+		})
 	}
 
 	/// Sets the visitor
