@@ -12,8 +12,13 @@ pub use self::{loadable::Loadable, priority_thread_pool::PriorityThreadPool};
 use {
 	app_error::Context,
 	core::cmp,
-	serde::de::DeserializeOwned,
-	std::{fs, io, path::Path},
+	serde::{Serialize, de::DeserializeOwned},
+	std::{
+		collections::{BTreeMap, HashMap},
+		fs,
+		io,
+		path::Path,
+	},
 };
 
 /// Error type for the crate.
@@ -122,4 +127,15 @@ pub fn create_parent(path: impl AsRef<Path>) -> Result<(), io::Error> {
 		Some(parent) => fs::create_dir_all(parent),
 		None => Ok(()),
 	}
+}
+
+/// Serializes a hashmap with the keys sorted
+pub fn hashmap_serialize_sorted<K, V, S>(hashmap: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+where
+	K: Ord + Serialize,
+	V: Serialize,
+	S: serde::Serializer,
+{
+	let map = hashmap.iter().collect::<BTreeMap<&K, &V>>();
+	map.serialize(serializer)
 }

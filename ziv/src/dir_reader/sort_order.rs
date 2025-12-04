@@ -6,7 +6,7 @@ pub struct SortOrder {
 	pub kind:    SortOrderKind,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 #[derive(strum::VariantArray)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum SortOrderKind {

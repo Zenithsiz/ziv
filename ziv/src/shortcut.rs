@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::{ViewMode, dir_reader::SortOrderKind},
+	crate::{ViewMode, dir_reader::SortOrderKind, util::hashmap_serialize_sorted},
 	std::collections::HashMap,
 	strum::VariantArray,
 };
@@ -31,9 +31,10 @@ pub struct Shortcuts {
 
 	pub toggle_display_mode: egui::Key,
 
-	// TODO: These should be serialized sorted.
+	#[serde(serialize_with = "hashmap_serialize_sorted")]
 	pub sort: HashMap<SortOrderKind, egui::Key>,
 
+	#[serde(serialize_with = "hashmap_serialize_sorted")]
 	pub view_modes: HashMap<ViewMode, egui::Key>,
 }
 
