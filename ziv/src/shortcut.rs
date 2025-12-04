@@ -1,5 +1,6 @@
 //! Shortcut keys
 
+// Imports
 use {
 	crate::{ViewMode, dir_reader::SortOrderKind},
 	std::collections::HashMap,
@@ -7,11 +8,17 @@ use {
 };
 
 /// Shortcut keys
+// TODO: Allow modifiers here.
 #[derive(Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Shortcuts {
 	pub prev: egui::Key,
 	pub next: egui::Key,
+
+	pub pan_up:   egui::Key,
+	pub pan_down: egui::Key,
+
+	pub fit_width_if_default: egui::Key,
 
 	pub first: egui::Key,
 	pub last:  egui::Key,
@@ -24,6 +31,7 @@ pub struct Shortcuts {
 
 	pub toggle_display_mode: egui::Key,
 
+	// TODO: These should be serialized sorted.
 	pub sort: HashMap<SortOrderKind, egui::Key>,
 
 	pub view_modes: HashMap<ViewMode, egui::Key>,
@@ -34,6 +42,9 @@ impl Default for Shortcuts {
 		Self {
 			prev:                    egui::Key::ArrowLeft,
 			next:                    egui::Key::ArrowRight,
+			pan_up:                  egui::Key::ArrowUp,
+			pan_down:                egui::Key::ArrowDown,
+			fit_width_if_default:    egui::Key::ArrowUp,
 			first:                   egui::Key::Home,
 			last:                    egui::Key::End,
 			fullscreen:              egui::Key::F,

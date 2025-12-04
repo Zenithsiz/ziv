@@ -677,18 +677,20 @@ impl EguiApp {
 
 			toggle_pause = input.consume_key(egui::Modifiers::NONE, self.shortcuts.toggle_pause);
 
-			// TODO: Make these configurable?
-			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-				let is_default_view_mode = self.view_mode == ViewMode::FitWindow &&
-					self.pan_zoom.offset == egui::Vec2::ZERO &&
-					self.pan_zoom.zoom == 0.0;
-
-				match is_default_view_mode {
-					true => self.view_mode = ViewMode::FitWidth,
-					false => self.vertical_pan_smooth += 1.0,
-				}
+			// Note: The order is important here, because by default `pan_up` and `fit_width_if_default`
+			//       use the same key, so if we consumed it here before checking whether it's
+			//       applicable, we'd not be able to pan up.
+			let is_default_view_mode = self.view_mode == ViewMode::FitWindow &&
+				self.pan_zoom.offset == egui::Vec2::ZERO &&
+				self.pan_zoom.zoom == 0.0;
+			if is_default_view_mode && input.consume_key(egui::Modifiers::NONE, self.shortcuts.fit_width_if_default) {
+				self.view_mode = ViewMode::FitWidth;
 			}
-			if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+
+			if input.consume_key(egui::Modifiers::NONE, self.shortcuts.pan_up) {
+				self.vertical_pan_smooth += 1.0;
+			}
+			if input.consume_key(egui::Modifiers::NONE, self.shortcuts.pan_down) {
 				self.vertical_pan_smooth -= 1.0;
 			}
 

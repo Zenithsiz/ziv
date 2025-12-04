@@ -5,6 +5,9 @@ video = ["gif", "mkv", "mp4", "webm"]
 [shortcuts]
 prev                    = "ArrowLeft"
 next                    = "ArrowRight"
+pan_up                  = "ArrowUp"
+pan_down                = "ArrowDown"
+fit_width_if_default    = "ArrowUp"
 first                   = "Home"
 last                    = "End"
 fullscreen              = "F"
