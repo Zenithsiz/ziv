@@ -117,50 +117,68 @@ impl Entries {
 	}
 
 	pub fn get(&self, idx: usize) -> Option<&DirEntry> {
-		match_inner! { entries @ &self.inner => entries.get_index(self.transform_idx(idx)?).map(|entry| &entry.0) }
+		let idx = match self.reverse {
+			true => self.len().checked_sub(idx)?.checked_sub(1)?,
+			false => idx,
+		};
+
+		match_inner! { entries @ &self.inner => entries.get_index(idx).map(|entry| &entry.0) }
 	}
 
 	pub fn search(&self, entry: &DirEntry) -> usize {
 		let idx = match_inner! { entries: T @ &self.inner => entries.rank(T::ref_cast(entry)) };
 
-		// Note: The only way for this index to be invalid is if it's
-		//       equal to our length (i.e. right at the end), so when
-		//       in reverse, we can just return the first index (0).
-		self.transform_idx(idx).unwrap_or_else(|| {
-			assert_eq!(idx, self.len());
-			0
-		})
+		match self.reverse {
+			// Note: If `idx == self.len`, this returns 0 instead, since
+			//       the rank of an element lower than any in the list is 0.
+			true => (self.len() - idx).saturating_sub(1),
+			false => idx,
+		}
 	}
 
 	pub fn range<R: IntoBounds<usize>>(&self, range: R) -> Option<Range<'_>> {
 		let (start, end) = range.into_bounds();
 
-		// Note: Transforming the indexes also checks for out of bounds when not reversed
-		let start = match start {
-			Bound::Included(idx) => Bound::Included(self.transform_idx(idx)?),
-			Bound::Excluded(idx) => Bound::Excluded(self.transform_idx(idx)?),
-			Bound::Unbounded => Bound::Unbounded,
-		};
-		let end = match end {
-			Bound::Included(idx) => Bound::Included(self.transform_idx(idx)?),
-			Bound::Excluded(idx) => Bound::Excluded(self.transform_idx(idx)?),
-			Bound::Unbounded => Bound::Unbounded,
-		};
+		let len = self.len();
+		let (start, end) = match self.reverse {
+			true => {
+				let new_start = match end {
+					Bound::Included(idx) => Bound::Excluded(len.checked_sub(idx)?),
+					Bound::Excluded(idx) => Bound::Excluded(len.checked_sub(idx)?.checked_sub(1)?),
+					Bound::Unbounded => Bound::Unbounded,
+				};
+				let new_end = match start {
+					Bound::Included(idx) => Bound::Excluded(len.checked_sub(idx)?),
+					Bound::Excluded(idx) => Bound::Excluded(len.checked_sub(idx)?.checked_sub(1)?),
+					Bound::Unbounded => Bound::Unbounded,
+				};
 
-		// Note: When reversed, start and end get swapped
-		let (start, mut end) = match self.reverse {
-			true => (end, start),
-			false => (start, end),
+				(new_start, new_end)
+			},
+			false => {
+				let start_within_bounds = match start {
+					Bound::Included(idx) => idx < len,
+					Bound::Excluded(idx) => idx <= len,
+					Bound::Unbounded => true,
+				};
+				let end_within_bounds = match end {
+					Bound::Included(idx) => idx < len,
+					Bound::Excluded(idx) => idx <= len,
+					Bound::Unbounded => true,
+				};
+				if !start_within_bounds || !end_within_bounds {
+					return None;
+				}
+
+				(start, end)
+			},
 		};
 
 		// Note: An excluded bound of 0 triggers a crash, so we compensate
 		//       by including it and then removing the element
-		let pop_last = match end {
-			Bound::Excluded(0) => {
-				end = Bound::Included(0);
-				true
-			},
-			_ => false,
+		let (end, pop_last) = match end {
+			Bound::Excluded(0) => (Bound::Included(0), true),
+			_ => (end, false),
 		};
 
 		match_inner! { entries @ &self.inner => {
@@ -169,24 +187,15 @@ impl Entries {
 				iter.next_back();
 			}
 
-			Some(Range(iter.into()))
+			Some(Range { iter: iter.into(), reverse: self.reverse })
 		}}
 	}
 
 	pub fn iter(&self) -> Iter<'_> {
 		let iter = match_inner! { entries @ &self.inner => entries.iter().into() };
-		Iter(iter)
-	}
-
-	/// Transforms an index, depending on whether we're reversed or not.
-	///
-	/// # Errors
-	/// Returns `None` when the index would be out of bounds, including
-	/// if not reversed.
-	fn transform_idx(&self, idx: usize) -> Option<usize> {
-		match self.reverse {
-			true => self.len().checked_sub(idx)?.checked_sub(1),
-			false => (idx < self.len()).then_some(idx),
+		Iter {
+			iter,
+			reverse: self.reverse,
 		}
 	}
 }
@@ -199,16 +208,19 @@ enum RangeInner<'a> {
 }
 
 #[derive(Debug)]
-pub struct Range<'a>(RangeInner<'a>);
+pub struct Range<'a> {
+	iter:    RangeInner<'a>,
+	reverse: bool,
+}
 
 impl<'a> Iterator for Range<'a> {
 	type Item = &'a DirEntry;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		match &mut self.0 {
-			RangeInner::FileName(iter) => iter.next().map(|entry| &entry.0),
-			RangeInner::ModificationDate(iter) => iter.next().map(|entry| &entry.0),
-			RangeInner::Size(iter) => iter.next().map(|entry| &entry.0),
+		match &mut self.iter {
+			RangeInner::FileName(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+			RangeInner::ModificationDate(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+			RangeInner::Size(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
 		}
 	}
 }
@@ -221,16 +233,19 @@ enum IterInner<'a> {
 }
 
 #[derive(Debug)]
-pub struct Iter<'a>(IterInner<'a>);
+pub struct Iter<'a> {
+	iter:    IterInner<'a>,
+	reverse: bool,
+}
 
 impl<'a> Iterator for Iter<'a> {
 	type Item = &'a DirEntry;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		match &mut self.0 {
-			IterInner::FileName(iter) => iter.next().map(|entry| &entry.0),
-			IterInner::ModificationDate(iter) => iter.next().map(|entry| &entry.0),
-			IterInner::Size(iter) => iter.next().map(|entry| &entry.0),
+		match &mut self.iter {
+			IterInner::FileName(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+			IterInner::ModificationDate(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+			IterInner::Size(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
 		}
 	}
 }
@@ -251,6 +266,13 @@ impl IntoIterator for Entries {
 		}};
 
 		entries.into_iter()
+	}
+}
+
+fn iter_next<I: DoubleEndedIterator>(iter: &mut I, reverse: bool) -> Option<I::Item> {
+	match reverse {
+		true => iter.next_back(),
+		false => iter.next(),
 	}
 }
 
