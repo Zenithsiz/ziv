@@ -524,13 +524,13 @@ impl EguiApp {
 		ui: &mut egui::Ui,
 		image: egui::Image,
 		image_size: egui::Vec2,
-		window_size: egui::Vec2,
 		pan_zoom: &mut PanZoom,
 		view_mode: ViewMode,
 		window_response: &egui::Response,
 		vertical_pan: f32,
 		controls: &Controls,
 	) -> egui::Response {
+		let window_size = ui.available_size().round_ui();
 		let window_as = window_size.y / window_size.x;
 		let image_as = image_size.y / image_size.x;
 
@@ -761,12 +761,10 @@ impl EguiApp {
 					.maintain_aspect_ratio(true)
 					.fit_to_exact_size(ui.available_size());
 
-				let window_size = ui.available_size().round_ui();
 				output.image_response = Some(Self::draw_image(
 					ui,
 					image,
 					image_size,
-					window_size,
 					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
@@ -859,13 +857,10 @@ impl EguiApp {
 					self.resized_image = true;
 				}
 
-				let window_size = ui.available_size().round_ui();
-
 				output.image_response = Some(Self::draw_image(
 					ui,
 					image,
 					image_size,
-					window_size,
 					&mut self.pan_zoom,
 					self.view_mode,
 					input.window_response,
