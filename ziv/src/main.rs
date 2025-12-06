@@ -12,7 +12,9 @@
 	decl_macro,
 	range_into_bounds,
 	path_is_empty,
-	yeet_expr
+	yeet_expr,
+	impl_trait_in_assoc_type,
+	macro_derive
 )]
 
 // Modules
@@ -236,7 +238,7 @@ impl EguiApp {
 				let entry_idxs = self
 					.loaded_entries
 					.iter()
-					.map(|entry| self.dir_reader.idx_of(entry).ok().flatten())
+					.map(|entry| self.dir_reader.idx_of(entry).ok())
 					.collect::<Option<Vec<_>>>()?;
 
 				(new_idx, entry_idxs)
@@ -856,9 +858,7 @@ impl EguiApp {
 							for row in rows {
 								let idxs =
 									(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
-								let Some(entries) = self.dir_reader.entry_range(idxs) else {
-									return;
-								};
+								let entries = self.dir_reader.entry_range(idxs);
 
 								for entry in entries {
 									let hovered_id = egui::Id::new(("display-list-hover", &entry));

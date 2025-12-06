@@ -6,6 +6,7 @@
 		"humansize",
 		"imageops",
 		"indexmap",
+		"indexset",
 		"natord",
 		"walkdir",
 		"zutil"

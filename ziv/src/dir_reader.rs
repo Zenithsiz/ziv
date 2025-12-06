@@ -3,11 +3,13 @@
 // TODO: Allow recursively reading all files?
 
 // Modules
+pub mod entries;
 pub mod entry;
 pub mod sort_order;
 
 // Exports
 pub use self::{
+	entries::Entries,
 	entry::DirEntry,
 	sort_order::{SortOrder, SortOrderKind},
 };
@@ -61,15 +63,16 @@ pub struct DirReader {
 impl DirReader {
 	/// Creates a new directory reader
 	pub fn new(path: PathBuf) -> Result<Self, AppError> {
+		let sort_order = SortOrder {
+			reverse: false,
+			kind:    SortOrderKind::FileName,
+		};
 		let inner = Arc::new(Mutex::new(Inner {
-			sort_order:         SortOrder {
-				reverse: false,
-				kind:    SortOrderKind::FileName,
-			},
-			entries:            vec![],
-			sort_progress:      None,
-			cur_entry:          None,
-			visitor:            None,
+			sort_order,
+			entries: Entries::new(sort_order),
+			sort_progress: None,
+			cur_entry: None,
+			visitor: None,
 			allowed_extensions: HashSet::new(),
 		}));
 
@@ -131,20 +134,11 @@ impl DirReader {
 	}
 
 	/// Returns a range of entries
-	pub fn entry_range<R>(&self, range: R) -> Option<Vec<DirEntry>>
+	pub fn entry_range<R>(&self, range: R) -> Vec<DirEntry>
 	where
 		R: IntoBounds<usize>,
 	{
-		let entries = self
-			.inner
-			.lock()
-			.entries
-			.get(range.into_bounds())?
-			.iter()
-			.map(DirEntry::clone)
-			.collect();
-
-		Some(entries)
+		self.inner.lock().entries.range(range.into_bounds()).cloned().collect()
 	}
 
 	/// Gets the current entry.
@@ -201,7 +195,7 @@ impl DirReader {
 
 	/// Removes an entry from the list
 	pub fn remove(&self, entry: &DirEntry) {
-		self.inner.lock().remove(&entry.path());
+		self.inner.lock().remove(entry);
 	}
 
 	/// Returns the number of entries
@@ -210,8 +204,8 @@ impl DirReader {
 	}
 
 	/// Returns the index of an entry.
-	pub fn idx_of(&self, entry: &DirEntry) -> Result<Option<usize>, AppError> {
-		self.inner.lock().search(entry).map(Result::ok)
+	pub fn idx_of(&self, entry: &DirEntry) -> Result<usize, AppError> {
+		self.inner.lock().search(entry)
 	}
 
 	/// Reads a path into this directory reader.
@@ -284,7 +278,7 @@ impl DirReader {
 						notify::EventKind::Remove(_) |
 						notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::From)) =>
 							for path in event.paths {
-								inner.lock().remove(&path);
+								inner.lock().remove_by_path(&path);
 							},
 						_ => tracing::trace!("Ignoring watch event"),
 					}
@@ -362,15 +356,16 @@ impl DirReader {
 		}
 
 		// Create the entry and add the metadata if we already have it
-		let mut inner = inner.lock();
 		let entry = DirEntry::new(path.to_owned());
 		if let Some(metadata) = metadata.try_into_metadata() {
 			entry.set_metadata(metadata);
 		}
 
 		// Then search to where to insert it and insert it
-		let (Ok(idx) | Err(idx)) = inner.search(&entry)?;
-		inner.insert(idx, entry.clone());
+		let mut inner = inner.lock();
+		let sort_order = inner.sort_order;
+		MutexGuard::unlocked(&mut inner, || entry.load_for_order(sort_order))?;
+		inner.insert(entry.clone());
 		drop(inner);
 
 		Ok(Some(entry))
@@ -392,13 +387,32 @@ impl DirReader {
 
 			let entries = {
 				let mut inner = inner.lock();
+				let prev_sort_order = inner.sort_order;
 				inner.sort_order = sort_order;
 
-				let mut entries = mem::take(&mut inner.entries);
+				// If we're just reversing it, just set it on the entries.
+				if prev_sort_order.kind == sort_order.kind {
+					inner.entries.set_reverse(sort_order.reverse);
+					if let Some(orphaned_entries) = orphaned_entries.take() {
+						inner.entries.extend(orphaned_entries);
+					}
+
+					let entries_len = inner.entries.len();
+					if let Some(cur_entry) = &mut inner.cur_entry &&
+						let Some(idx) = &mut cur_entry.idx
+					{
+						*idx = entries_len - *idx - 1;
+					}
+					continue;
+				}
+
+				let entries = mem::replace(&mut inner.entries, Entries::new(sort_order));
 				if let Some(cur_entry) = &mut inner.cur_entry {
 					cur_entry.idx = None;
 				}
 				drop(inner);
+
+				let mut entries = entries.into_iter().collect::<Vec<_>>();
 
 				// Append any previously orphaned entries from a failed sort
 				if let Some(orphaned_entries) = orphaned_entries.take() {
@@ -421,8 +435,8 @@ impl DirReader {
 					break;
 				}
 
-				match inner.search(&entry) {
-					Ok(Ok(idx) | Err(idx)) => inner.insert(idx, entry),
+				match entry.load_for_order(sort_order) {
+					Ok(()) => inner.insert(entry),
 					Err(err) => tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path()),
 				}
 
@@ -459,8 +473,7 @@ impl MetadataOrFileType {
 
 #[derive(derive_more::Debug)]
 struct Inner {
-	// Invariant: All entries have the field for `sort_order` loaded.
-	entries: Vec<DirEntry>,
+	entries: Entries,
 
 	sort_order:    SortOrder,
 	sort_progress: Option<SortProgress>,
@@ -506,14 +519,7 @@ impl Inner {
 				},
 			};
 
-			// If it doesn't have an index, it's being processed asynchronously, so
-			// nothing we can do, just return it without an index
-			let Ok(idx) = idx else {
-				break cur_entry;
-			};
-
-			// Otherwise, we need to set the index.
-			// However, since we might have unlocked the mutex when loading the field,
+			// Since we might have unlocked the mutex when loading the field,
 			// we first need to make sure the current entry hasn't changed. If it has,
 			// we need to try again
 			if let Some(cur_entry_after) = &mut self.cur_entry &&
@@ -532,14 +538,7 @@ impl Inner {
 		let Some(cur_entry) = self.cur_entry() else {
 			return;
 		};
-
-		// Note: If we don't have an index, then we haven't been added
-		//       to the list yet, so we can just remove ourselves.
-		//       If we get added again, and the user calls remove, then
-		//       we'll have an index to remove from.
-		if let Some(idx) = cur_entry.idx {
-			self.entries.remove(idx);
-		}
+		self.entries.remove(&cur_entry.entry);
 
 		self.cur_entry = None;
 
@@ -619,9 +618,7 @@ impl Inner {
 	}
 
 	/// Binary searches the index of `entry`.
-	///
-	/// See [`slice::binary_search`] for details on the return type.
-	pub fn search(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<Result<usize, usize>, AppError> {
+	pub fn search(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<usize, AppError> {
 		loop {
 			let sort_order = self.sort_order;
 			MutexGuard::unlocked(self, || entry.load_for_order(sort_order))?;
@@ -630,11 +627,7 @@ impl Inner {
 			}
 		}
 
-		let idx = self.entries.binary_search_by(|other_entry| {
-			other_entry
-				.cmp_with(entry, self.sort_order)
-				.expect("Entry sort field was unloaded")
-		});
+		let idx = self.entries.search(entry);
 
 		Ok(idx)
 	}
@@ -660,29 +653,36 @@ impl Inner {
 	}
 
 	/// Removes an entry by path
-	pub fn remove(&mut self, path: &Path) -> Option<DirEntry> {
-		// TODO: Both of these are `O(N)`
-		let idx = self.entries.iter().position(|entry| &*entry.path() == path)?;
-		let entry = self.entries.remove(idx);
+	pub fn remove(&mut self, entry: &DirEntry) -> bool {
+		if !self.entries.remove(entry) {
+			return false;
+		}
+
 		if let Some(cur_entry) = &self.cur_entry &&
-			cur_entry.entry == entry
+			cur_entry.entry == *entry
 		{
 			self.cur_entry = None;
 		}
+
+		true
+	}
+
+	/// Removes an entry by path
+	pub fn remove_by_path(&mut self, path: &Path) -> Option<DirEntry> {
+		// TODO: Make finding by path not `O(N)`?
+		let entry = self.entries.iter().find(|entry| &*entry.path() == path)?.clone();
+		assert!(self.remove(&entry));
 
 		Some(entry)
 	}
 
 	/// Inserts an entry
-	pub fn insert(self: &mut MutexGuard<'_, Self>, idx: usize, entry: DirEntry) {
-		// TODO: This is `O(N)`, we need a better storage
-		self.entries.insert(idx, entry.clone());
+	pub fn insert(self: &mut MutexGuard<'_, Self>, entry: DirEntry) {
+		self.entries.insert(entry.clone());
 
-		if let Some(cur_entry) = &mut self.cur_entry &&
-			let Some(cur_idx) = &mut cur_entry.idx &&
-			*cur_idx >= idx
-		{
-			*cur_idx += 1;
+		// TODO: Update the index instead of discarding it?
+		if let Some(cur_entry) = &mut self.cur_entry {
+			cur_entry.idx = None;
 		}
 
 		if let Some(visitor) = self.visitor.as_ref().map(Arc::clone) {
