@@ -510,6 +510,8 @@ impl Inner {
 			// Note: On errors, we remove the current entry and try again.
 			//       We only need to remove it from the field because all entries
 			//       in the list are guaranteed to be loaded for the correct sort order.
+			// TODO: This *can* block when sorting, so we should just return if the field
+			//       for the current sort order isn't loaded.
 			let idx = match self.search(&cur_entry.entry) {
 				Ok(idx) => idx,
 				Err(err) => {
