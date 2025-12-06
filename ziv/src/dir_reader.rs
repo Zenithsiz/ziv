@@ -420,7 +420,7 @@ impl DirReader {
 					break;
 				}
 
-				match entry.load_for_order(sort_order) {
+				match MutexGuard::unlocked(&mut inner, || entry.load_for_order(sort_order)) {
 					Ok(()) => inner.insert(entry),
 					Err(err) => tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path()),
 				}
