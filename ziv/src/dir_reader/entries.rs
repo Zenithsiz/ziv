@@ -117,24 +117,39 @@ impl Entries {
 	}
 
 	pub fn get(&self, idx: usize) -> Option<&DirEntry> {
-		match_inner! { entries @ &self.inner => entries.get_index(self.transform_idx(idx)).map(|entry| &entry.0) }
+		match_inner! { entries @ &self.inner => entries.get_index(self.transform_idx(idx)?).map(|entry| &entry.0) }
 	}
 
 	pub fn search(&self, entry: &DirEntry) -> usize {
 		let idx = match_inner! { entries: T @ &self.inner => entries.rank(T::ref_cast(entry)) };
 
-		self.transform_idx(idx)
+		// Note: The only way for this index to be invalid is if it's
+		//       equal to our length (i.e. right at the end), so when
+		//       in reverse, we can just return the first index (0).
+		self.transform_idx(idx).unwrap_or_else(|| {
+			assert_eq!(idx, self.len());
+			0
+		})
 	}
 
-	pub fn range<R: IntoBounds<usize>>(&self, range: R) -> Range<'_> {
+	pub fn range<R: IntoBounds<usize>>(&self, range: R) -> Option<Range<'_>> {
 		let (start, end) = range.into_bounds();
 
+		// Note: Transforming the indexes also checks for out of bounds when not reversed
+		let start = match start {
+			Bound::Included(idx) => Bound::Included(self.transform_idx(idx)?),
+			Bound::Excluded(idx) => Bound::Excluded(self.transform_idx(idx)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+		let end = match end {
+			Bound::Included(idx) => Bound::Included(self.transform_idx(idx)?),
+			Bound::Excluded(idx) => Bound::Excluded(self.transform_idx(idx)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		// Note: When reversed, start and end get swapped
 		let (start, mut end) = match self.reverse {
-			// Note: They're swapped because reversing swaps the start and end
-			true => (
-				end.map(|idx| self.transform_idx(idx)),
-				start.map(|idx| self.transform_idx(idx)),
-			),
+			true => (end, start),
 			false => (start, end),
 		};
 
@@ -154,7 +169,7 @@ impl Entries {
 				iter.next_back();
 			}
 
-			Range(iter.into())
+			Some(Range(iter.into()))
 		}}
 	}
 
@@ -164,13 +179,14 @@ impl Entries {
 	}
 
 	/// Transforms an index, depending on whether we're reversed or not.
-	fn transform_idx(&self, idx: usize) -> usize {
+	///
+	/// # Errors
+	/// Returns `None` when the index would be out of bounds, including
+	/// if not reversed.
+	fn transform_idx(&self, idx: usize) -> Option<usize> {
 		match self.reverse {
-			true => match self.len() {
-				0 => 0,
-				len => len - idx - 1,
-			},
-			false => idx,
+			true => self.len().checked_sub(idx)?.checked_sub(1),
+			false => (idx < self.len()).then_some(idx),
 		}
 	}
 }

@@ -808,11 +808,21 @@ impl EguiApp {
 				};
 				self.loaded_entries.insert(input.entry.clone().into());
 
-				if let Some(idx) = input.entry.idx {
+				// Note: If there are no entries, there's no point in pre-loading.
+				//       This can happen when we start sorting and nothing has been
+				//       added back in yet.
+				let entries_len = self.dir_reader.len();
+				if let Some(idx) = input.entry.idx &&
+					entries_len != 0
+				{
 					// Preload all entries on the side
 					let preload_start = idx.saturating_sub(self.preload_prev);
-					let preload_end = idx + self.preload_next;
-					for entry in self.dir_reader.entry_range(preload_start..=preload_end) {
+					let preload_end = (idx + self.preload_next).min(entries_len - 1);
+					for entry in self
+						.dir_reader
+						.entry_range(preload_start..=preload_end)
+						.expect("Range should be valid")
+					{
 						if entry == *input.entry {
 							continue;
 						}
@@ -822,17 +832,16 @@ impl EguiApp {
 					}
 
 					// Then handle wraparounds
-					let len = self.dir_reader.len();
 					if idx < self.preload_prev {
-						let start = (len - idx).saturating_sub(self.preload_prev);
-						for entry in self.dir_reader.entry_range(start..) {
+						let start = (entries_len - idx).saturating_sub(self.preload_prev);
+						for entry in self.dir_reader.entry_range(start..).expect("Range should be valid") {
 							_ = entry.texture(&self.thread_pool, ui.ctx());
 							self.loaded_entries.insert(entry);
 						}
 					}
-					if idx + self.preload_next >= len {
-						let end = (self.preload_next - (len - idx)).min(len);
-						for entry in self.dir_reader.entry_range(..=end) {
+					if idx + self.preload_next >= entries_len {
+						let end = (self.preload_next - (entries_len - idx)).min(entries_len);
+						for entry in self.dir_reader.entry_range(..=end).expect("Range should be valid") {
 							_ = entry.texture(&self.thread_pool, ui.ctx());
 							self.loaded_entries.insert(entry);
 						}
@@ -1110,7 +1119,7 @@ impl EguiApp {
 							for row in rows {
 								let idxs =
 									(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
-								let entries = self.dir_reader.entry_range(idxs);
+								let entries = self.dir_reader.entry_range(idxs).expect("Range should be valid");
 
 								for entry in entries {
 									let hovered_id = egui::Id::new(("display-list-hover", &entry));

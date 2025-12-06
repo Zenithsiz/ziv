@@ -123,11 +123,12 @@ impl DirReader {
 	}
 
 	/// Returns a range of entries
-	pub fn entry_range<R>(&self, range: R) -> Vec<DirEntry>
+	pub fn entry_range<R>(&self, range: R) -> Option<Vec<DirEntry>>
 	where
 		R: IntoBounds<usize>,
 	{
-		self.inner.lock().entries.range(range.into_bounds()).cloned().collect()
+		let entries = self.inner.lock().entries.range(range.into_bounds())?.cloned().collect();
+		Some(entries)
 	}
 
 	/// Gets the current entry.
