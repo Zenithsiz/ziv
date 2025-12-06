@@ -811,6 +811,9 @@ impl EguiApp {
 				// Note: If there are no entries, there's no point in pre-loading.
 				//       This can happen when we start sorting and nothing has been
 				//       added back in yet.
+				// Note: Despite the indexes being correct, we double-check all these
+				//       `entry_range` calls because the map can mutate in the background,
+				//       given we're not holding any locks, thus making the indexes invalid.
 				let entries_len = self.dir_reader.len();
 				if let Some(idx) = input.entry.idx &&
 					entries_len != 0
@@ -818,30 +821,34 @@ impl EguiApp {
 					// Preload all entries on the side
 					let preload_start = idx.saturating_sub(self.preload_prev);
 					let preload_end = (idx + self.preload_next).min(entries_len - 1);
-					for entry in self
-						.dir_reader
-						.entry_range(preload_start..=preload_end)
-						.expect("Range should be valid")
-					{
-						if entry == *input.entry {
-							continue;
-						}
+					if let Some(entries) = self.dir_reader.entry_range(preload_start..=preload_end) {
+						for entry in entries {
+							if entry == *input.entry {
+								continue;
+							}
 
-						_ = entry.texture(&self.thread_pool, ui.ctx());
-						self.loaded_entries.insert(entry);
-					}
-
-					// Then handle wraparounds
-					if idx < self.preload_prev {
-						let start = (entries_len - idx).saturating_sub(self.preload_prev);
-						for entry in self.dir_reader.entry_range(start..).expect("Range should be valid") {
 							_ = entry.texture(&self.thread_pool, ui.ctx());
 							self.loaded_entries.insert(entry);
 						}
 					}
-					if idx + self.preload_next >= entries_len {
-						let end = (self.preload_next - (entries_len - idx)).min(entries_len);
-						for entry in self.dir_reader.entry_range(..=end).expect("Range should be valid") {
+
+					// Then handle wraparounds
+					if idx < self.preload_prev &&
+						let Some(entries) = self
+							.dir_reader
+							.entry_range((entries_len - idx).saturating_sub(self.preload_prev)..)
+					{
+						for entry in entries {
+							_ = entry.texture(&self.thread_pool, ui.ctx());
+							self.loaded_entries.insert(entry);
+						}
+					}
+					if idx + self.preload_next >= entries_len &&
+						let Some(entries) = self
+							.dir_reader
+							.entry_range(..=(self.preload_next - (entries_len - idx)).min(entries_len))
+					{
+						for entry in entries {
 							_ = entry.texture(&self.thread_pool, ui.ctx());
 							self.loaded_entries.insert(entry);
 						}
@@ -1119,7 +1126,9 @@ impl EguiApp {
 							for row in rows {
 								let idxs =
 									(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
-								let entries = self.dir_reader.entry_range(idxs).expect("Range should be valid");
+								let Some(entries) = self.dir_reader.entry_range(idxs) else {
+									continue;
+								};
 
 								for entry in entries {
 									let hovered_id = egui::Id::new(("display-list-hover", &entry));
