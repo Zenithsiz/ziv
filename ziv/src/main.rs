@@ -854,22 +854,12 @@ impl EguiApp {
 				//       our resize size isn't the fullscreen size the user
 				//       is using, and resizing won't change that.
 				let is_fullscreen = ui.input(|input| input.viewport().fullscreen).unwrap_or(false);
-				let window_size = match self.resized_image || is_fullscreen {
-					true => ui.available_size().round_ui(),
-					false => {
-						let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size) else {
-							return output;
-						};
+				if !self.resized_image && !is_fullscreen {
+					output.resize_size = Some(image_size);
+					self.resized_image = true;
+				}
 
-						let scale = f32::min(monitor_size.x / image_size.x, monitor_size.y / image_size.y);
-						let image_size_monitor = (image_size * scale).round_ui();
-
-						output.resize_size = Some(image_size_monitor);
-						self.resized_image = true;
-
-						image_size_monitor
-					},
-				};
+				let window_size = ui.available_size().round_ui();
 
 				output.image_response = Some(Self::draw_image(
 					ui,
@@ -1027,7 +1017,20 @@ impl EguiApp {
 		});
 		let draw_output = panel_output.inner;
 
-		if let Some(size) = draw_output.resize_size {
+		// Note: If we couldn't get the monitor size, ignore any resizes
+		// TODO: This resize can make our window fall out the bottom or right of
+		//       the monitor since we're resizing up to monitor size,
+		//       but our position isn't guaranteed to be 0.
+		//       Unfortunately, while we could set our position (outside of wayland),
+		//       `egui` has no way to get the monitor position (only size), so
+		//       we'd always move ourselves to the user's left/top-most monitor, which isn't
+		//       correct.
+		if let Some(image_size) = draw_output.resize_size &&
+			let Some(monitor_size) = ctx.input(|input| input.viewport().monitor_size)
+		{
+			let scale = f32::min(monitor_size.x / image_size.x, monitor_size.y / image_size.y).min(1.0);
+			let size = (image_size * scale).round_ui();
+
 			tracing::info!("Resizing to {}x{}", size.x, size.y);
 			ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
 		}
