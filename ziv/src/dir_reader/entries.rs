@@ -164,7 +164,7 @@ impl Entries {
 		};
 
 		match_inner! { entries @ &self.inner => {
-			let mut iter = 	entries.range_idx((start, end));
+			let mut iter = entries.range_idx((start, end));
 			if pop_last {
 				iter.next_back();
 			}
