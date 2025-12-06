@@ -24,7 +24,7 @@ where
 			// If the config file doesn't exist, write the default
 			// Note: If we're unable to check for existence, we assume it does exist, so we don't override anything
 			if !fs::exists(path).unwrap_or(true) &&
-				let Err(err) = self::write(&config, path)
+				let Err(err) = self::save(&config, path)
 			{
 				tracing::warn!("Unable to write default config to {path:?}: {}", err.pretty());
 			}
@@ -46,12 +46,12 @@ where
 	Ok(config)
 }
 
-/// Writes the config
-fn write<T>(config: &T, path: &Path) -> Result<(), AppError>
+/// Saves the configuration to path
+pub fn save<T>(config: &T, path: &Path) -> Result<(), AppError>
 where
 	T: Serialize,
 {
-	tracing::debug!("Creating a default config in path: {path:?}");
+	tracing::debug!("Saving config in path: {path:?}");
 
 	super::create_parent(path).context("Unable to create config parent directory")?;
 	let config_toml = toml::to_string(config).context("Unable to serialize config")?;

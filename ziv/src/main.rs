@@ -14,7 +14,9 @@
 	path_is_empty,
 	yeet_expr,
 	impl_trait_in_assoc_type,
-	macro_derive
+	macro_derive,
+	yield_expr,
+	gen_blocks
 )]
 
 // Modules
@@ -39,7 +41,7 @@ use {
 			entry::{ImageDetails, ImageKind},
 		},
 		dirs::Dirs,
-		shortcut::{Shortcuts, eguiInputStateExt},
+		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
 		util::{AppError, PriorityThreadPool, RectUtils},
 	},
 	app_error::Context,
@@ -84,8 +86,8 @@ fn run() -> Result<(), AppError> {
 	let dirs = Arc::new(dirs);
 
 	// Get configuration
-	let config_path = args.config_file.as_deref().unwrap_or_else(|| dirs.config());
-	let config = util::config::get_or_create_with(config_path, Config::default);
+	let config_path = args.config_file.as_deref().unwrap_or_else(|| dirs.config()).to_owned();
+	let config = util::config::get_or_create_with(&config_path, Config::default);
 	tracing::debug!(?config, "Configuration");
 
 	// Set logger file from arguments
@@ -102,7 +104,8 @@ fn run() -> Result<(), AppError> {
 		"ziv",
 		native_options,
 		Box::new(|cc| {
-			let app = EguiApp::new(cc, config, dirs, thread_pool, path).map_err(AppError::into_std_error)?;
+			let app =
+				EguiApp::new(cc, config_path, config, dirs, thread_pool, path).map_err(AppError::into_std_error)?;
 			Ok(Box::new(app))
 		}),
 	)
@@ -147,19 +150,23 @@ struct Controls {
 
 #[derive(Debug)]
 struct EguiApp {
-	_dirs:               Arc<Dirs>,
-	thread_pool:         PriorityThreadPool,
-	dir_reader:          DirReader,
-	next_frame_idx:      usize,
-	pan_zoom:            PanZoom,
-	resized_image:       bool,
-	view_mode:           ViewMode,
-	display_mode:        DisplayMode,
-	shortcuts:           Shortcuts,
-	entries_per_row:     usize,
-	thumbnails_dir:      Arc<Path>,
-	controls:            Controls,
-	vertical_pan_smooth: f32,
+	config_path:              PathBuf,
+	_dirs:                    Arc<Dirs>,
+	thread_pool:              PriorityThreadPool,
+	dir_reader:               DirReader,
+	next_frame_idx:           usize,
+	pan_zoom:                 PanZoom,
+	resized_image:            bool,
+	view_mode:                ViewMode,
+	display_mode:             DisplayMode,
+	shortcuts:                Shortcuts,
+	entries_per_row:          usize,
+	thumbnails_dir:           ThumbnailsDir,
+	controls:                 Controls,
+	vertical_pan_smooth:      f32,
+	settings_is_open:         bool,
+	settings_tab:             SettingsTab,
+	settings_waiting_for_key: Option<ShortcutKeyIdent>,
 
 	preload_prev: usize,
 	preload_next: usize,
@@ -173,6 +180,7 @@ impl EguiApp {
 	/// Creates a new app
 	pub fn new(
 		cc: &eframe::CreationContext<'_>,
+		config_path: PathBuf,
 		config: Config,
 		dirs: Arc<Dirs>,
 		thread_pool: PriorityThreadPool,
@@ -183,12 +191,13 @@ impl EguiApp {
 			ctx: cc.egui_ctx.clone(),
 		});
 
-		let thumbnails_dir = config
-			.thumbnails_cache
-			.as_deref()
-			.map_or_else(|| Arc::clone(dirs.thumbnails()), Arc::from);
+		let thumbnails_dir = match config.thumbnails_cache {
+			Some(dir) => ThumbnailsDir::Specified(Arc::from(dir)),
+			None => ThumbnailsDir::Auto(Arc::clone(dirs.thumbnails())),
+		};
 
 		Ok(Self {
+			config_path,
 			_dirs: dirs,
 			thread_pool,
 			dir_reader,
@@ -213,8 +222,31 @@ impl EguiApp {
 			vertical_pan_smooth: 0.0,
 			preload_prev: config.preload[0],
 			preload_next: config.preload[1],
+			settings_is_open: false,
+			settings_tab: SettingsTab::General,
+			settings_waiting_for_key: None,
 			entries_per_row: 4,
 		})
+	}
+
+	/// Saves the configuration
+	fn save_config(&self) -> Result<(), AppError> {
+		let config = Config {
+			thumbnails_cache: match &self.thumbnails_dir {
+				ThumbnailsDir::Auto(_path) => None,
+				ThumbnailsDir::Specified(path) => Some(path.to_path_buf()),
+			},
+			preload:          [self.preload_prev, self.preload_next],
+			shortcuts:        self.shortcuts.clone(),
+			controls:         config::Controls {
+				zoom_sensitivity:         self.controls.zoom_sensitivity,
+				scroll_sensitivity:       self.controls.scroll_sensitivity,
+				keyboard_pan_sensitivity: self.controls.keyboard_pan_sensitivity,
+				keyboard_pan_smooth:      self.controls.keyboard_pan_smooth,
+			},
+		};
+
+		util::config::save(&config, &self.config_path)
 	}
 
 	fn reset_on_change_entry(&mut self, ctx: &egui::Context, prev_entry: &CurEntry, new_entry: &CurEntry) {
@@ -346,6 +378,144 @@ impl EguiApp {
 
 				ui.label(info);
 			});
+	}
+
+	/// Draws the config window, if open
+	fn draw_config_window(&mut self, ctx: &egui::Context) {
+		if !self.settings_is_open {
+			return;
+		}
+
+		struct Output {
+			should_close: bool,
+		}
+
+		// TODO: Switch to a deferred viewport?
+		let id = egui::ViewportId::from_hash_of("config-window");
+		let builder = egui::ViewportBuilder::default().with_title("Settings");
+		let output = ctx.show_viewport_immediate(id, builder, |ctx, _| {
+			let mut output = Output { should_close: false };
+
+			ctx.input(|input| {
+				if input.viewport().close_requested() {
+					output.should_close = true;
+				}
+			});
+
+			egui::CentralPanel::default().show(ctx, |ui| {
+				ui.horizontal(|ui| {
+					for &tab in SettingsTab::VARIANTS {
+						ui.selectable_value(&mut self.settings_tab, tab, tab.to_string());
+					}
+				});
+				ui.separator();
+
+				match self.settings_tab {
+					SettingsTab::General => {
+						ui.collapsing("Preload", |ui| {
+							for (name, preload) in
+								[("Previous", &mut self.preload_prev), ("Next", &mut self.preload_next)]
+							{
+								egui::Slider::new(preload, 0..=16)
+									.text(name)
+									.clamping(egui::SliderClamping::Never)
+									.ui(ui);
+							}
+						});
+
+						ui.collapsing("Controls", |ui| {
+							for (name, preload, range) in [
+								("Zoom sensitivity", &mut self.controls.zoom_sensitivity, 100.0..=300.0),
+								("Scroll sensitivity", &mut self.controls.scroll_sensitivity, 1.0..=3.0),
+								(
+									"Keyboard pan sensitivity",
+									&mut self.controls.keyboard_pan_sensitivity,
+									0.0..=1.0,
+								),
+								("Keyboard pan smooth", &mut self.controls.keyboard_pan_smooth, 0.0..=1.0),
+							] {
+								egui::Slider::new(preload, range)
+									.text(name)
+									.clamping(egui::SliderClamping::Never)
+									.ui(ui);
+							}
+						});
+					},
+					SettingsTab::Shortcuts => {
+						if let Some(shortcut_ident) = self.settings_waiting_for_key {
+							ctx.input(|input| {
+								for event in &input.events {
+									let &egui::Event::Key { key, modifiers, .. } = event else {
+										continue;
+									};
+
+									let shortcut_key = shortcut_ident.get(&mut self.shortcuts);
+									shortcut_key.key = key;
+									shortcut_key.modifiers = modifiers;
+									self.settings_waiting_for_key = None;
+									break;
+								}
+							});
+						}
+
+						// TODO: Organize these better?
+						for shortcut_ident in ShortcutKeyIdent::variants() {
+							let shortcut_key: &mut ShortcutKey = shortcut_ident.get(&mut self.shortcuts);
+
+							ui.horizontal(|ui| {
+								ui.label(shortcut_ident.to_string());
+								// TODO: Include modifiers here
+
+								match self.settings_waiting_for_key == Some(shortcut_ident) {
+									true =>
+										if ui.button("Waiting for key...").clicked() {
+											self.settings_waiting_for_key = None;
+										},
+									false => {
+										let mut name = shortcut_key.key.name().to_string();
+										if shortcut_key.modifiers.alt {
+											name += " (⎇ Alt)";
+										}
+										if shortcut_key.modifiers.ctrl ||
+											(!ctx.os().is_mac() && shortcut_key.modifiers.command)
+										{
+											name += " (⎈ Ctrl)";
+										}
+										if shortcut_key.modifiers.shift {
+											name += " (⇧ Shift)";
+										}
+										if shortcut_key.modifiers.mac_cmd ||
+											(ctx.os().is_mac() && shortcut_key.modifiers.command)
+										{
+											name += " (⌘ Cmd)";
+										}
+
+										if ui.button(name).clicked() {
+											self.settings_waiting_for_key = Some(shortcut_ident);
+										}
+									},
+								}
+							});
+						}
+					},
+				}
+
+				ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+					if ui.button("Save").clicked() &&
+						let Err(err) = self.save_config()
+					{
+						tracing::error!("Unable to save configuration file: {err:?}");
+					}
+					ui.separator();
+				});
+			});
+
+			output
+		});
+
+		if output.should_close {
+			self.settings_is_open = false;
+		}
 	}
 
 	/// Draws an image over the whole screen
@@ -814,7 +984,7 @@ impl EguiApp {
 				None => window_response,
 			};
 
-			// Merge the window response with the image so we catch events on both
+			// TODO: Should we make this a native viewport?
 			egui::Popup::context_menu(&response).show(|ui| {
 				if ui.button("Open").clicked() &&
 					let Err(err) = opener::open(&*cur_entry_path)
@@ -845,6 +1015,12 @@ impl EguiApp {
 						}
 					}
 				});
+
+				ui.separator();
+
+				if ui.button("Settings").clicked() {
+					self.settings_is_open = true;
+				}
 			});
 
 			draw_output
@@ -951,7 +1127,7 @@ impl EguiApp {
 											match entry.thumbnail_texture(
 												&self.thread_pool,
 												ui.ctx(),
-												&self.thumbnails_dir,
+												self.thumbnails_dir.path(),
 											) {
 												Ok(Some(image)) => {
 													let image = egui::Image::from_texture(image)
@@ -1060,6 +1236,7 @@ impl eframe::App for EguiApp {
 			DisplayMode::Image => self.draw_display_image(ctx),
 			DisplayMode::List => self.draw_display_list(ctx),
 		}
+		self.draw_config_window(ctx);
 
 		if let Some(sort_order) = set_sort_order {
 			self.dir_reader.set_sort_order(sort_order);
@@ -1134,4 +1311,131 @@ struct DrawOutput {
 struct PanZoom {
 	offset: egui::Vec2,
 	zoom:   f32,
+}
+
+/// Settings tab
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(derive_more::Display)]
+#[derive(strum::VariantArray)]
+enum SettingsTab {
+	#[display("General")]
+	General,
+
+	#[display("Shortcuts")]
+	Shortcuts,
+}
+
+/// Shortcut key identifier
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(derive_more::Display)]
+#[derive(strum::EnumDiscriminants)]
+#[strum_discriminants(name(ShortcutKeyIdentInner))]
+#[strum_discriminants(derive(strum::VariantArray))]
+enum ShortcutKeyIdent {
+	#[display("Previous image")]
+	Prev,
+	#[display("Next image")]
+	Next,
+	#[display("Pan up")]
+	PanUp,
+	#[display("Pan down")]
+	PanDown,
+	#[display("Fit to width (if default)")]
+	FitWidthIfDefault,
+	#[display("First image")]
+	First,
+	#[display("Last image")]
+	Last,
+	#[display("Fullscreen")]
+	Fullscreen,
+	#[display("Exit fullscreen or quit")]
+	ExitFullscreenOrQuit,
+	#[display("Toggle pause")]
+	TogglePause,
+	#[display("Quit")]
+	Quit,
+	#[display("Toggle display mode")]
+	ToggleDisplayMode,
+	#[display("Sort by {}", Self::sort_name(*_0))]
+	Sort(SortOrderKind),
+	#[display("Fit to {}", Self::view_name(*_0))]
+	ViewModes(ViewMode),
+}
+
+impl ShortcutKeyIdent {
+	gen fn variants() -> Self {
+		for inner in ShortcutKeyIdentInner::VARIANTS {
+			match inner {
+				ShortcutKeyIdentInner::Prev => yield Self::Prev,
+				ShortcutKeyIdentInner::Next => yield Self::Next,
+				ShortcutKeyIdentInner::PanUp => yield Self::PanUp,
+				ShortcutKeyIdentInner::PanDown => yield Self::PanDown,
+				ShortcutKeyIdentInner::FitWidthIfDefault => yield Self::FitWidthIfDefault,
+				ShortcutKeyIdentInner::First => yield Self::First,
+				ShortcutKeyIdentInner::Last => yield Self::Last,
+				ShortcutKeyIdentInner::Fullscreen => yield Self::Fullscreen,
+				ShortcutKeyIdentInner::ExitFullscreenOrQuit => yield Self::ExitFullscreenOrQuit,
+				ShortcutKeyIdentInner::TogglePause => yield Self::TogglePause,
+				ShortcutKeyIdentInner::Quit => yield Self::Quit,
+				ShortcutKeyIdentInner::ToggleDisplayMode => yield Self::ToggleDisplayMode,
+				ShortcutKeyIdentInner::Sort =>
+					for &kind in SortOrderKind::VARIANTS {
+						yield Self::Sort(kind);
+					},
+				ShortcutKeyIdentInner::ViewModes =>
+					for &view_mode in ViewMode::VARIANTS {
+						yield Self::ViewModes(view_mode);
+					},
+			}
+		}
+	}
+
+	const fn sort_name(kind: SortOrderKind) -> &'static str {
+		match kind {
+			SortOrderKind::FileName => "file name",
+			SortOrderKind::ModificationDate => "modification date",
+			SortOrderKind::Size => "size",
+		}
+	}
+
+	const fn view_name(mode: ViewMode) -> &'static str {
+		match mode {
+			ViewMode::FitWindow => "window",
+			ViewMode::FitWidth => "width",
+			ViewMode::ActualSize => "actual size",
+		}
+	}
+
+	pub fn get(self, shortcuts: &mut Shortcuts) -> &mut ShortcutKey {
+		match self {
+			Self::Prev => &mut shortcuts.prev,
+			Self::Next => &mut shortcuts.next,
+			Self::PanUp => &mut shortcuts.pan_up,
+			Self::PanDown => &mut shortcuts.pan_down,
+			Self::FitWidthIfDefault => &mut shortcuts.fit_width_if_default,
+			Self::First => &mut shortcuts.first,
+			Self::Last => &mut shortcuts.last,
+			Self::Fullscreen => &mut shortcuts.fullscreen,
+			Self::ExitFullscreenOrQuit => &mut shortcuts.exit_fullscreen_or_quit,
+			Self::TogglePause => &mut shortcuts.toggle_pause,
+			Self::Quit => &mut shortcuts.quit,
+			Self::ToggleDisplayMode => &mut shortcuts.toggle_display_mode,
+			Self::Sort(kind) => shortcuts.sort.entry(kind).or_insert(ShortcutKey::UNBOUND),
+			Self::ViewModes(view_mode) => shortcuts.view_modes.entry(view_mode).or_insert(ShortcutKey::UNBOUND),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+enum ThumbnailsDir {
+	Auto(Arc<Path>),
+	Specified(Arc<Path>),
+}
+
+impl ThumbnailsDir {
+	const fn path(&self) -> &Arc<Path> {
+		match self {
+			Self::Auto(path) | Self::Specified(path) => path,
+		}
+	}
 }

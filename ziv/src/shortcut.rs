@@ -90,6 +90,22 @@ pub struct ShortcutKey {
 	pub key:       egui::Key,
 }
 
+impl ShortcutKey {
+	/// A sentinel value meaning that no key was bound.
+	// TODO: We shouldn't be using an existing key despite
+	//       the user never using this one.
+	pub const UNBOUND: Self = Self {
+		modifiers: egui::Modifiers {
+			alt:     true,
+			ctrl:    true,
+			shift:   true,
+			mac_cmd: true,
+			command: true,
+		},
+		key:       egui::Key::Escape,
+	};
+}
+
 impl From<egui::Key> for ShortcutKey {
 	fn from(key: egui::Key) -> Self {
 		Self {
