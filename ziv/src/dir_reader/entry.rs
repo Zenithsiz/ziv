@@ -2,9 +2,10 @@
 
 // Modules
 pub mod image;
+pub mod video;
 
 // Exports
-pub use self::image::EntryImage;
+pub use self::{image::EntryImage, video::EntryVideo};
 
 // Imports
 use {
@@ -34,6 +35,7 @@ struct Inner {
 	image_kind:        Mutex<Loadable<ImageKind>>,
 	modified_date:     Mutex<Loadable<SystemTime>>,
 	texture:           Mutex<Loadable<EntryImage>>,
+	video:             Mutex<Loadable<EntryVideo>>,
 	thumbnail_texture: Mutex<Loadable<EntryImage>>,
 	image_details:     Mutex<Option<ImageDetails>>,
 }
@@ -50,6 +52,7 @@ impl DirEntry {
 			image_kind:        Mutex::new(Loadable::new()),
 			modified_date:     Mutex::new(Loadable::new()),
 			texture:           Mutex::new(Loadable::new()),
+			video:             Mutex::new(Loadable::new()),
 			thumbnail_texture: Mutex::new(Loadable::new()),
 			image_details:     Mutex::new(None),
 		}))
@@ -186,6 +189,27 @@ impl DirEntry {
 	/// Removes this image's texture
 	pub fn remove_texture(&self) {
 		self.0.texture.lock().remove();
+	}
+
+	/// Returns this image's video
+	pub fn video(
+		&self,
+		thread_pool: &PriorityThreadPool,
+		egui_ctx: &egui::Context,
+	) -> Result<Option<EntryVideo>, AppError> {
+		#[cloned(this = self, egui_ctx)]
+		self.0
+			.video
+			.lock()
+			.try_load(thread_pool, Priority::HIGH, move || {
+				EntryVideo::new(&egui_ctx, &this.path())
+			})
+			.map(Option::<&_>::cloned)
+	}
+
+	/// Removes this image's video
+	pub fn remove_video(&self) {
+		self.0.video.lock().remove();
 	}
 
 	/// Returns this image's thumbnail texture

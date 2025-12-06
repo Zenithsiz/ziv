@@ -1,5 +1,6 @@
 //! Entry image
 
+// Imports
 use {
 	super::ImageKind,
 	crate::util::AppError,

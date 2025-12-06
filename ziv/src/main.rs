@@ -44,7 +44,7 @@ use {
 	},
 	app_error::Context,
 	clap::Parser,
-	core::time::Duration,
+	core::{mem, time::Duration},
 	egui::{Widget, emath::GuiRounding},
 	indexmap::IndexSet,
 	itertools::Itertools,
@@ -111,13 +111,6 @@ fn run() -> Result<(), AppError> {
 	Ok(())
 }
 
-#[derive(derive_more::Debug)]
-struct CurPlayer {
-	entry:  DirEntry,
-	#[debug(ignore)]
-	player: egui_video::Player,
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 #[derive(strum::VariantArray)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -157,7 +150,6 @@ struct EguiApp {
 	_dirs:               Arc<Dirs>,
 	thread_pool:         PriorityThreadPool,
 	dir_reader:          DirReader,
-	cur_player:          Option<CurPlayer>,
 	next_frame_idx:      usize,
 	pan_zoom:            PanZoom,
 	resized_image:       bool,
@@ -200,7 +192,6 @@ impl EguiApp {
 			_dirs: dirs,
 			thread_pool,
 			dir_reader,
-			cur_player: None,
 			next_frame_idx: 0,
 			pan_zoom: PanZoom {
 				offset: egui::Vec2::ZERO,
@@ -226,12 +217,19 @@ impl EguiApp {
 		})
 	}
 
-	fn reset_on_change_entry(&mut self, new_entry: &CurEntry) {
+	fn reset_on_change_entry(&mut self, ctx: &egui::Context, prev_entry: &CurEntry, new_entry: &CurEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
 			zoom:   0.0,
 		};
 		self.resized_image = false;
+
+		if let Ok(Some(video)) = prev_entry.video(&self.thread_pool, ctx) {
+			let mut video = video.lock();
+			if video.set_offscreen() {
+				video.player().stop();
+			}
+		}
 
 		if self.loaded_entries.len() > self.max_loaded_entries {
 			// Try to get the indices or all entries (including the new)
@@ -273,6 +271,7 @@ impl EguiApp {
 				.shift_remove_index(to_remove_loaded_idx)
 				.expect("Just checked it wasn't empty");
 			entry.remove_texture();
+			entry.remove_video();
 		}
 	}
 
@@ -546,29 +545,48 @@ impl EguiApp {
 
 		match kind {
 			ImageKind::Video => {
-				let player = match &mut self.cur_player {
-					Some(player) if player.entry == *input.entry => player,
-					_ => match egui_video::Player::new(ui.ctx(), input.entry.path().to_path_buf()) {
-						Ok(mut player) => {
-							player.start();
-							output.resize_size = Some(player.size);
-							self.cur_player.insert(CurPlayer {
-								entry: input.entry.clone().into(),
-								player,
-							})
-						},
-						Err(err) => {
-							tracing::warn!("{:?}", err.context("Unable to create video player"));
-							self.dir_reader.remove(input.entry);
-							return output;
-						},
+				// Note: It's important we check the loaded video *before*
+				//       returning, else we could accumulate a bunch of loading
+				//       videos
+				let video = match input.entry.video(&self.thread_pool, ui.ctx()) {
+					Ok(texture) => texture,
+					Err(err) => {
+						tracing::warn!("Unable to load video {:?}, removing: {err:?}", input.entry.path());
+						self.dir_reader.cur_entry_remove();
+						return output;
 					},
 				};
+				self.loaded_entries.insert(input.entry.clone().into());
 
-				let image_size = player.player.size;
+				let Some(video) = video else {
+					ui.centered_and_justified(|ui| {
+						ui.weak("Loading...");
+					});
+					return output;
+				};
 
+				// If it wasn't on-screen, start playing it and resize
+				let mut video = video.lock();
+				if !video.set_onscreen() {
+					let player = video.player();
+					match player.player_state.get() {
+						egui_video::PlayerState::Paused => player.resume(),
+						_ => player.start(),
+					}
+					output.resize_size = Some(player.size);
+				}
+				let player = video.player();
+
+				if input.toggle_pause {
+					match player.player_state.get() {
+						egui_video::PlayerState::Paused => player.resume(),
+						egui_video::PlayerState::Playing => player.pause(),
+						_ => (),
+					}
+				}
+
+				let image_size = player.size;
 				let image = player
-					.player
 					.generate_frame_image(image_size)
 					.maintain_aspect_ratio(true)
 					.fit_to_exact_size(ui.available_size());
@@ -586,17 +604,18 @@ impl EguiApp {
 					&self.controls,
 				));
 
-				player.player.render_controls(ui, input.window_response);
-				player.player.process_state();
+				player.render_controls(ui, input.window_response);
+				player.process_state();
 
 				if !input.entry.has_image_details() {
-					let duration_ms = match u64::try_from(player.player.duration_ms) {
+					let duration_ms = match u64::try_from(player.duration_ms) {
 						Ok(duration) => duration,
 						Err(_) => {
-							tracing::warn!("Video duration was negative: {}ms", player.player.duration_ms);
+							tracing::warn!("Video duration was negative: {}ms", player.duration_ms);
 							0
 						},
 					};
+					drop(video);
 
 					input.entry.set_image_details(ImageDetails::Video {
 						size:     image_size,
@@ -750,33 +769,25 @@ impl EguiApp {
 			}
 		});
 
-		if toggle_pause && let Some(player) = &mut self.cur_player {
-			match player.player.player_state.get() {
-				egui_video::PlayerState::Paused => player.player.resume(),
-				egui_video::PlayerState::Playing => player.player.pause(),
-				_ => (),
-			}
-		}
-
 		let Some(mut cur_entry) = self.dir_reader.cur_entry() else {
 			return;
 		};
 
 		if move_prev && let Some(entry) = self.dir_reader.cur_entry_set_prev() {
-			cur_entry = entry;
-			self.reset_on_change_entry(&cur_entry);
+			let prev_entry = mem::replace(&mut cur_entry, entry);
+			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
 		}
 		if move_next && let Some(entry) = self.dir_reader.cur_entry_set_next() {
-			cur_entry = entry;
-			self.reset_on_change_entry(&cur_entry);
+			let prev_entry = mem::replace(&mut cur_entry, entry);
+			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
 		}
 		if move_first && let Some(entry) = self.dir_reader.cur_entry_set_first() {
-			cur_entry = entry;
-			self.reset_on_change_entry(&cur_entry);
+			let prev_entry = mem::replace(&mut cur_entry, entry);
+			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
 		}
 		if move_last && let Some(entry) = self.dir_reader.cur_entry_set_last() {
-			cur_entry = entry;
-			self.reset_on_change_entry(&cur_entry);
+			let prev_entry = mem::replace(&mut cur_entry, entry);
+			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
 		}
 
 		let cur_entry = cur_entry;
@@ -793,8 +804,9 @@ impl EguiApp {
 
 
 			let draw_input = DrawInput {
-				entry:           &cur_entry,
+				entry: &cur_entry,
 				window_response: &window_response,
+				toggle_pause,
 			};
 			let mut draw_output = self.draw_entry(ui, draw_input);
 			let response = match draw_output.image_response.take() {
@@ -857,6 +869,17 @@ impl EguiApp {
 
 	fn draw_display_list(&mut self, ctx: &egui::Context) {
 		let mut goto_entry = None;
+
+		// If the current entry was playing, pause it
+		// TODO: Not do this here
+		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
+			let Ok(Some(video)) = cur_entry.video(&self.thread_pool, ctx)
+		{
+			let mut video = video.lock();
+			if video.set_offscreen() {
+				video.player().pause();
+			}
+		}
 
 		egui::TopBottomPanel::top("display-list-controls")
 			.show_separator_line(false)
@@ -1098,6 +1121,7 @@ macro write_str(
 struct DrawInput<'a> {
 	entry:           &'a CurEntry,
 	window_response: &'a egui::Response,
+	toggle_pause:    bool,
 }
 
 #[derive(Clone, Debug)]
