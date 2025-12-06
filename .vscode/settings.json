@@ -3,6 +3,7 @@
 		"eframe",
 		"egui",
 		"emath",
+		"ffprobe",
 		"humansize",
 		"imageops",
 		"indexmap",

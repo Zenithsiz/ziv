@@ -1,9 +1,11 @@
 //! Entry image
 
 use {
+	super::ImageKind,
 	crate::util::AppError,
 	app_error::{Context, app_error},
-	std::{collections::HashSet, ffi::OsStr, fs, path::Path, sync::Arc},
+	image::{ImageFormat, ImageReader},
+	std::{ffi::OsStr, fs, path::Path, sync::Arc},
 	url::Url,
 };
 
@@ -15,8 +17,8 @@ pub struct EntryImage {
 
 impl EntryImage {
 	/// Creates a new entry image from an image
-	pub fn new(egui_ctx: &egui::Context, path: &Path) -> Result<Self, AppError> {
-		let mut image = image::open(path).context("Unable to read image")?;
+	pub fn new(egui_ctx: &egui::Context, path: &Path, format: ImageFormat) -> Result<Self, AppError> {
+		let mut image = self::open_with_format(path, format)?;
 
 		// Resize the image if it's too big for the gpu
 		// Note: If the max texture size doesn't fit into a `u32`, then we can be sure
@@ -57,8 +59,8 @@ impl EntryImage {
 	pub fn thumbnail(
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Path,
-		video_exts: &HashSet<String>,
 		path: &Path,
+		kind: ImageKind,
 	) -> Result<Self, AppError> {
 		let cache_path = {
 			let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
@@ -74,14 +76,16 @@ impl EntryImage {
 		let image = match image::open(&cache_path) {
 			Ok(image) => image,
 			Err(err) => {
-				// Note: `image` supports gifs, so we can still generate thumbnails for them
-				let is_video = path
-					.extension()
-					.and_then(OsStr::to_str)
-					.is_some_and(|ext| ext != "gif" && video_exts.contains(ext));
+				let format = match kind {
+					ImageKind::Image { format } => Some(format),
+					// Note: `image` supports gifs, so we can still generate thumbnails for them
+					ImageKind::Video if path.extension().and_then(OsStr::to_str) == Some("gif") =>
+						Some(ImageFormat::Gif),
+					ImageKind::Video => None,
+				};
 
-				match is_video {
-					true => {
+				match format {
+					None => {
 						tracing::debug!(
 							?path,
 							?cache_path,
@@ -92,9 +96,9 @@ impl EntryImage {
 						// TODO: Implement video thumbnails
 						image::DynamicImage::new_rgba8(256, 256)
 					},
-					false => {
+					Some(format) => {
 						tracing::debug!(?path, ?cache_path, ?err, "No thumbnail found, generating one");
-						let image = image::open(path).context("Unable to read image")?;
+						let image = self::open_with_format(path, format)?;
 						let thumbnail = image.thumbnail(256, 256);
 
 						// TODO: Make saving the thumbnail a non-fatal error
@@ -126,6 +130,13 @@ impl EntryImage {
 	pub fn size(&self) -> egui::Vec2 {
 		self.handle.size_vec2()
 	}
+}
+
+/// Opens an image with a given format
+fn open_with_format(path: &Path, format: ImageFormat) -> Result<image::DynamicImage, app_error::AppError> {
+	let mut image_reader = ImageReader::open(path).context("Unable to open image")?;
+	image_reader.set_format(format);
+	image_reader.decode().context("Unable to read image")
 }
 
 impl core::fmt::Debug for EntryImage {

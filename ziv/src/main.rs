@@ -30,7 +30,14 @@ use {
 	self::{
 		args::Args,
 		config::Config,
-		dir_reader::{CurEntry, DirEntry, DirReader, SortOrder, SortOrderKind, entry::ImageDetails},
+		dir_reader::{
+			CurEntry,
+			DirEntry,
+			DirReader,
+			SortOrder,
+			SortOrderKind,
+			entry::{ImageDetails, ImageKind},
+		},
 		dirs::Dirs,
 		shortcut::{Shortcuts, eguiInputStateExt},
 		util::{AppError, PriorityThreadPool, RectUtils},
@@ -42,8 +49,6 @@ use {
 	indexmap::IndexSet,
 	itertools::Itertools,
 	std::{
-		collections::HashSet,
-		ffi::OsStr,
 		fmt::Write,
 		path::{Path, PathBuf},
 		process::ExitCode,
@@ -161,7 +166,6 @@ struct EguiApp {
 	shortcuts:           Shortcuts,
 	entries_per_row:     usize,
 	thumbnails_dir:      Arc<Path>,
-	video_exts:          Arc<HashSet<String>>,
 	controls:            Controls,
 	vertical_pan_smooth: f32,
 
@@ -186,8 +190,6 @@ impl EguiApp {
 		dir_reader.set_visitor(DirReaderVisitor {
 			ctx: cc.egui_ctx.clone(),
 		});
-		dir_reader.add_allowed_extensions(&config.exts.image);
-		dir_reader.add_allowed_extensions(&config.exts.video);
 
 		let thumbnails_dir = config
 			.thumbnails_cache
@@ -210,7 +212,6 @@ impl EguiApp {
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
 			thumbnails_dir,
-			video_exts: Arc::new(config.exts.video.into_iter().collect()),
 			shortcuts: config.shortcuts,
 			controls: Controls {
 				zoom_sensitivity:         config.controls.zoom_sensitivity,
@@ -533,16 +534,21 @@ impl EguiApp {
 			self.vertical_pan_smooth = 0.0;
 		}
 
-		let entry_path = input.entry.path();
-		match entry_path
-			.extension()
-			.and_then(OsStr::to_str)
-			.is_some_and(|ext| self.video_exts.contains(ext))
-		{
-			true => {
+		let kind = match input.entry.try_image_kind(&self.thread_pool) {
+			Ok(Some(kind)) => kind,
+			Ok(None) => return output,
+			Err(err) => {
+				tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
+				self.dir_reader.remove(input.entry);
+				return output;
+			},
+		};
+
+		match kind {
+			ImageKind::Video => {
 				let player = match &mut self.cur_player {
 					Some(player) if player.entry == *input.entry => player,
-					_ => match egui_video::Player::new(ui.ctx(), entry_path.to_path_buf()) {
+					_ => match egui_video::Player::new(ui.ctx(), input.entry.path().to_path_buf()) {
 						Ok(mut player) => {
 							player.start();
 							output.resize_size = Some(player.size);
@@ -599,7 +605,7 @@ impl EguiApp {
 				}
 			},
 
-			false => {
+			ImageKind::Image { .. } => {
 				// Note: It's important we check the loaded textures *before*
 				//       returning, else we could accumulate a bunch of loading
 				//       textures
@@ -920,7 +926,6 @@ impl EguiApp {
 												&self.thread_pool,
 												ui.ctx(),
 												&self.thumbnails_dir,
-												&self.video_exts,
 											) {
 												Ok(Some(image)) => {
 													let image = egui::Image::from_texture(image)

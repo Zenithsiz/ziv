@@ -1,9 +1,5 @@
 preload = [1, 1]
 
-[exts]
-image = ["jpg", "jpeg", "png", "webp"]
-video = ["gif", "mkv", "mp4", "webm"]
-
 [shortcuts]
 prev                    = "ArrowLeft"
 next                    = "ArrowRight"

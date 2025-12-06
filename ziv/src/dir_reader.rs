@@ -21,8 +21,6 @@ use {
 	core::{mem, ops::IntoBounds, time::Duration},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
-		collections::HashSet,
-		ffi::OsStr,
 		fs::{self},
 		path::{Path, PathBuf},
 		sync::{Arc, mpsc},
@@ -73,7 +71,6 @@ impl DirReader {
 			sort_progress: None,
 			cur_entry: None,
 			visitor: None,
-			allowed_extensions: HashSet::new(),
 		}));
 
 		#[cloned(inner)]
@@ -108,14 +105,6 @@ impl DirReader {
 	/// Sets the visitor
 	pub fn set_visitor(&self, visitor: impl Visitor + Send + Sync + 'static) {
 		self.inner.lock().visitor = Some(Arc::new(visitor));
-	}
-
-	/// Adds allowed extensions
-	pub fn add_allowed_extensions(&self, extensions: impl IntoIterator<Item: Into<String>>) {
-		self.inner
-			.lock()
-			.allowed_extensions
-			.extend(extensions.into_iter().map(Into::into));
 	}
 
 	/// Gets the sort order
@@ -346,15 +335,6 @@ impl DirReader {
 			return Ok(None);
 		}
 
-		if path
-			.extension()
-			.and_then(OsStr::to_str)
-			.is_none_or(|ext| !inner.lock().allowed_extensions.contains(ext))
-		{
-			tracing::info!("Ignoring non-image: {path:?}");
-			return Ok(None);
-		}
-
 		// Create the entry and add the metadata if we already have it
 		let entry = DirEntry::new(path.to_owned());
 		if let Some(metadata) = metadata.try_into_metadata() {
@@ -482,8 +462,6 @@ struct Inner {
 
 	#[debug(ignore)]
 	visitor: Option<Arc<dyn Visitor + Send + Sync>>,
-
-	allowed_extensions: HashSet<String>,
 }
 
 impl Inner {

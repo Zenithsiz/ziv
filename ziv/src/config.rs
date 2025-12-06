@@ -14,27 +14,11 @@ pub struct Config {
 	/// Preload previous/next
 	pub preload: [usize; 2],
 
-	/// Extensions
-	pub exts: Exts,
-
 	/// Shortcuts
 	pub shortcuts: Shortcuts,
 
 	/// Controls
 	pub controls: Controls,
-}
-
-/// Extensions
-// Note: Fields are required to avoid an empty config file meaning
-//       that no extensions are allowed, as opposed to default.
-#[derive(Clone, Debug)]
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Exts {
-	/// Image
-	pub image: Vec<String>,
-
-	/// Video
-	pub video: Vec<String>,
 }
 
 /// Controls
@@ -59,10 +43,6 @@ impl Default for Config {
 		Self {
 			thumbnails_cache: None,
 			preload:          [1, 1],
-			exts:             Exts {
-				image: DEFAULT_IMAGE_EXTS.iter().copied().map(String::from).collect(),
-				video: DEFAULT_VIDEO_EXTS.iter().copied().map(String::from).collect(),
-			},
 			shortcuts:        Shortcuts::default(),
 			controls:         Controls {
 				zoom_sensitivity:         200.0,
@@ -73,9 +53,3 @@ impl Default for Config {
 		}
 	}
 }
-
-/// Default image extensions
-pub const DEFAULT_IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp"];
-
-/// Default video extensions
-pub const DEFAULT_VIDEO_EXTS: &[&str] = &["gif", "mkv", "mp4", "webm"];

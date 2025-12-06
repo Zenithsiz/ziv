@@ -10,11 +10,11 @@ pub use self::image::EntryImage;
 use {
 	super::{SortOrder, SortOrderKind},
 	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash, time::Duration},
 	parking_lot::Mutex,
 	std::{
-		collections::HashSet,
 		ffi::{OsStr, OsString},
 		fs::{self, Metadata},
 		path::{Path, PathBuf},
@@ -31,6 +31,7 @@ struct Inner {
 	// TODO: Move all interior mutability inside of loadable to avoid holding
 	//       the locks for longer than necessary
 	metadata:          Mutex<Loadable<Arc<Metadata>>>,
+	image_kind:        Mutex<Loadable<ImageKind>>,
 	modified_date:     Mutex<Loadable<SystemTime>>,
 	#[debug(ignore)]
 	texture:           Mutex<Loadable<EntryImage>>,
@@ -48,6 +49,7 @@ impl DirEntry {
 		Self(Arc::new(Inner {
 			path:              Mutex::new(path.into()),
 			metadata:          Mutex::new(Loadable::new()),
+			image_kind:        Mutex::new(Loadable::new()),
 			modified_date:     Mutex::new(Loadable::new()),
 			texture:           Mutex::new(Loadable::new()),
 			thumbnail_texture: Mutex::new(Loadable::new()),
@@ -98,6 +100,27 @@ impl DirEntry {
 	/// Sets the metadata of this entry
 	pub(super) fn set_metadata(&self, metadata: fs::Metadata) {
 		self.0.metadata.lock().set(Arc::new(metadata));
+	}
+
+	/// Gets the image kind, blocking
+	fn image_kind_blocking(&self) -> Result<ImageKind, AppError> {
+		self.0
+			.image_kind
+			.lock()
+			.load(|| self::load_image_kind(&self.path()))
+			.context("Unable to get image kind")
+			.copied()
+	}
+
+	/// Returns this image's kind
+	pub fn try_image_kind(&self, thread_pool: &PriorityThreadPool) -> Result<Option<ImageKind>, AppError> {
+		#[cloned(this = self)]
+		self.0
+			.image_kind
+			.lock()
+			.try_load(thread_pool, Priority::HIGH, move || self::load_image_kind(&this.path()))
+			.map(Option::<&_>::copied)
+			.context("Unable to get image kind")
 	}
 
 	/// Gets the modified date, blocking
@@ -153,7 +176,11 @@ impl DirEntry {
 			.texture
 			.lock()
 			.try_load(thread_pool, Priority::HIGH, move || {
-				EntryImage::new(&egui_ctx, &this.path())
+				let ImageKind::Image { format } = this.image_kind_blocking().context("Unable to get image kind")?
+				else {
+					app_error::bail!("Cannot load a video's texture");
+				};
+				EntryImage::new(&egui_ctx, &this.path(), format)
 			})
 			.map(Option::<&_>::cloned)
 	}
@@ -169,14 +196,14 @@ impl DirEntry {
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Arc<Path>,
-		video_exts: &Arc<HashSet<String>>,
 	) -> Result<Option<EntryImage>, AppError> {
-		#[cloned(this = self, egui_ctx, thumbnails_dir, video_exts)]
+		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0
 			.thumbnail_texture
 			.lock()
 			.try_load(thread_pool, Priority::LOW, move || {
-				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &video_exts, &this.path())
+				let kind = this.image_kind_blocking().context("Unable to get image kind")?;
+				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), kind)
 			})
 			.map(Option::<&_>::cloned)
 	}
@@ -255,7 +282,43 @@ pub enum ImageDetails {
 	Video { size: egui::Vec2, duration: Duration },
 }
 
+/// Image kind
+#[derive(Clone, Copy, Debug)]
+pub enum ImageKind {
+	Image { format: ImageFormat },
+	Video,
+}
+
 fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
 	let metadata = fs::metadata(path).context("Unable to get metadata")?;
 	Ok(Arc::new(metadata))
+}
+
+fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
+	// TODO: Instead of only accepting a set list of extensions for video, can
+	//       we use `ffprobe` to check whether it's a video or not?
+	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&
+		matches!(ext, "gif" | "mkv" | "mp4" | "webm")
+	{
+		return Ok(ImageKind::Video);
+	}
+
+	// If we got a format just from the path, return it
+	// TODO: Should we trust the extension?
+	if let Some(ext) = path.extension() &&
+		let Some(format) = ImageFormat::from_extension(ext)
+	{
+		return Ok(ImageKind::Image { format });
+	}
+
+	// Otherwise, try to guess it by opening it
+	let reader = ::image::ImageReader::open(path)
+		.context("Unable to create image reader")?
+		.with_guessed_format()
+		.context("Unable to read file")?;
+	if let Some(format) = reader.format() {
+		return Ok(ImageKind::Image { format });
+	}
+
+	app_error::bail!("Unable to guess image kind");
 }
