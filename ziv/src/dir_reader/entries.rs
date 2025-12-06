@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::{DirEntry, SortOrder, SortOrderKind},
-	core::ops::IntoBounds,
+	core::ops::{Bound, IntoBounds},
 	ref_cast::RefCast,
 	std::borrow::Borrow,
 };
@@ -129,7 +129,7 @@ impl Entries {
 	pub fn range<R: IntoBounds<usize>>(&self, range: R) -> Range<'_> {
 		let (start, end) = range.into_bounds();
 
-		let (start, end) = match self.reverse {
+		let (start, mut end) = match self.reverse {
 			// Note: They're swapped because reversing swaps the start and end
 			true => (
 				end.map(|idx| self.transform_idx(idx)),
@@ -138,8 +138,24 @@ impl Entries {
 			false => (start, end),
 		};
 
-		let iter = match_inner! { entries @ &self.inner => entries.range_idx((start, end)).into() };
-		Range(iter)
+		// Note: An excluded bound of 0 triggers a crash, so we compensate
+		//       by including it and then removing the element
+		let pop_last = match end {
+			Bound::Excluded(0) => {
+				end = Bound::Included(0);
+				true
+			},
+			_ => false,
+		};
+
+		match_inner! { entries @ &self.inner => {
+			let mut iter = 	entries.range_idx((start, end));
+			if pop_last {
+				iter.next_back();
+			}
+
+			Range(iter.into())
+		}}
 	}
 
 	pub fn iter(&self) -> Iter<'_> {
@@ -150,7 +166,10 @@ impl Entries {
 	/// Transforms an index, depending on whether we're reversed or not.
 	fn transform_idx(&self, idx: usize) -> usize {
 		match self.reverse {
-			true => self.len() - idx - 1,
+			true => match self.len() {
+				0 => 0,
+				len => len - idx - 1,
+			},
 			false => idx,
 		}
 	}
