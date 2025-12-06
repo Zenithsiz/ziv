@@ -165,6 +165,9 @@ struct EguiApp {
 	controls:            Controls,
 	vertical_pan_smooth: f32,
 
+	preload_prev: usize,
+	preload_next: usize,
+
 	/// Entries we're loaded
 	loaded_entries:     IndexSet<DirEntry>,
 	max_loaded_entries: usize,
@@ -216,6 +219,8 @@ impl EguiApp {
 				keyboard_pan_smooth:      config.controls.keyboard_pan_smooth,
 			},
 			vertical_pan_smooth: 0.0,
+			preload_prev: config.preload[0],
+			preload_next: config.preload[1],
 			entries_per_row: 4,
 		})
 	}
@@ -606,6 +611,34 @@ impl EguiApp {
 						return output;
 					},
 				};
+
+				if let Some(idx) = input.entry.idx {
+					// Preload all entries on the side
+					let preload_start = idx.saturating_sub(self.preload_prev);
+					let preload_end = idx + self.preload_next;
+					for entry in self.dir_reader.entry_range(preload_start..=preload_end) {
+						if entry == *input.entry {
+							continue;
+						}
+
+						_ = entry.texture(&self.thread_pool, ui.ctx());
+					}
+
+					// Then handle wraparounds
+					let len = self.dir_reader.len();
+					if idx < self.preload_prev {
+						let start = (len - idx).saturating_sub(self.preload_prev);
+						for entry in self.dir_reader.entry_range(start..) {
+							_ = entry.texture(&self.thread_pool, ui.ctx());
+						}
+					}
+					if idx + self.preload_next >= len {
+						let end = (self.preload_next - (len - idx)).min(len);
+						for entry in self.dir_reader.entry_range(..=end) {
+							_ = entry.texture(&self.thread_pool, ui.ctx());
+						}
+					}
+				}
 
 				self.loaded_entries.insert(input.entry.clone().into());
 				let Some(image) = image else {

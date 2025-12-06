@@ -11,6 +11,9 @@ pub struct Config {
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub thumbnails_cache: Option<PathBuf>,
 
+	/// Preload previous/next
+	pub preload: [usize; 2],
+
 	/// Extensions
 	pub exts: Exts,
 
@@ -55,6 +58,7 @@ impl Default for Config {
 	fn default() -> Self {
 		Self {
 			thumbnails_cache: None,
+			preload:          [1, 1],
 			exts:             Exts {
 				image: DEFAULT_IMAGE_EXTS.iter().copied().map(String::from).collect(),
 				video: DEFAULT_VIDEO_EXTS.iter().copied().map(String::from).collect(),
