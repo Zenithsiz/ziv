@@ -152,6 +152,11 @@ impl DirReader {
 		self.inner.lock().cur_entry()
 	}
 
+	/// Returns whether a current entry exists
+	pub fn has_cur_entry(&self) -> bool {
+		self.inner.lock().cur_entry.is_some()
+	}
+
 	/// Removes the current entry from the list
 	pub fn cur_entry_remove(&self) {
 		self.inner.lock().cur_entry_remove();

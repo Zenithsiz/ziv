@@ -167,6 +167,7 @@ struct EguiApp {
 	settings_is_open:         bool,
 	settings_tab:             SettingsTab,
 	settings_waiting_for_key: Option<ShortcutKeyIdent>,
+	prev_valid_entry:         Option<DirEntry>,
 
 	preload_prev: usize,
 	preload_next: usize,
@@ -225,6 +226,7 @@ impl EguiApp {
 			settings_is_open: false,
 			settings_tab: SettingsTab::General,
 			settings_waiting_for_key: None,
+			prev_valid_entry: None,
 			entries_per_row: 4,
 		})
 	}
@@ -924,6 +926,12 @@ impl EguiApp {
 			}
 		});
 
+		if !self.dir_reader.has_cur_entry() &&
+			let Some(entry) = &self.prev_valid_entry
+		{
+			self.dir_reader.cur_entry_set(entry.clone());
+		}
+
 		let Some(mut cur_entry) = self.dir_reader.cur_entry() else {
 			return;
 		};
@@ -963,8 +971,8 @@ impl EguiApp {
 				window_response: &window_response,
 				toggle_pause,
 			};
-			let mut draw_output = self.draw_entry(ui, draw_input);
-			let response = match draw_output.image_response.take() {
+			let draw_output = self.draw_entry(ui, draw_input);
+			let response = match draw_output.image_response.clone() {
 				Some(response) => response.union(window_response),
 				None => window_response,
 			};
@@ -1011,6 +1019,11 @@ impl EguiApp {
 			draw_output
 		});
 		let draw_output = panel_output.inner;
+
+		// If it was drawn, set this as our previous valid entry
+		if draw_output.image_response.is_some() {
+			self.prev_valid_entry = Some(cur_entry.clone().into());
+		}
 
 		// Note: If we couldn't get the monitor size, ignore any resizes
 		// TODO: This resize can make our window fall out the bottom or right of
