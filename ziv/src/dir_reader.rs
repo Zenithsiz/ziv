@@ -359,7 +359,7 @@ impl DirReader {
 	/// Sets the sort order
 	fn set_sort_order_inner(inner: &Arc<Mutex<Inner>>, rx: &mpsc::Receiver<SortOrder>) {
 		let mut next_sort_order = None;
-		let mut orphaned_entries = None;
+		let mut orphaned_entries = None::<std::vec::IntoIter<_>>;
 		while let Some(sort_order) = next_sort_order.take().or_else(|| rx.recv().ok()) {
 			// Checks whether a new sort order was issued so we can abort the current one
 			let mut check_for_new_sort = || {
@@ -370,40 +370,43 @@ impl DirReader {
 				next_sort_order.is_some()
 			};
 
+			// Get the entries to sort
 			let entries = {
 				let mut inner = inner.lock();
 				let prev_sort_order = inner.sort_order;
 				inner.sort_order = sort_order;
 
-				// If we're just reversing it, just set it on the entries.
-				if prev_sort_order.kind == sort_order.kind {
-					inner.entries.set_reverse(sort_order.reverse);
-					if let Some(orphaned_entries) = orphaned_entries.take() {
-						inner.entries.extend(orphaned_entries);
-					}
+				match prev_sort_order.kind == sort_order.kind {
+					// If we're just reversing the entries, set it on the entries and
+					// then just sort any orphaned entries from a previous sort attempt.
+					// Note: We can't just insert these entries, because they might not
+					//       be loaded for the current sort order, since they could have
+					//       been orphaned while sorting something else.
+					true => {
+						inner.entries.set_reverse(sort_order.reverse);
+						// TODO: Compute the index when reversing?
+						if let Some(cur_entry) = &mut inner.cur_entry {
+							cur_entry.idx = None;
+						}
+						drop(inner);
 
-					let entries_len = inner.entries.len();
-					if let Some(cur_entry) = &mut inner.cur_entry &&
-						let Some(idx) = &mut cur_entry.idx
-					{
-						*idx = entries_len - *idx - 1;
-					}
-					continue;
+						orphaned_entries.take().unwrap_or_default().collect::<Vec<_>>()
+					},
+
+					// Otherwise, take all the entries, and remove the index on the current one
+					false => {
+						let entries = mem::replace(&mut inner.entries, Entries::new(sort_order));
+						if let Some(cur_entry) = &mut inner.cur_entry {
+							cur_entry.idx = None;
+						}
+						drop(inner);
+
+						entries
+							.into_iter()
+							.chain(orphaned_entries.take().unwrap_or_default())
+							.collect::<Vec<_>>()
+					},
 				}
-
-				let entries = mem::replace(&mut inner.entries, Entries::new(sort_order));
-				if let Some(cur_entry) = &mut inner.cur_entry {
-					cur_entry.idx = None;
-				}
-				drop(inner);
-
-				let mut entries = entries.into_iter().collect::<Vec<_>>();
-
-				// Append any previously orphaned entries from a failed sort
-				if let Some(orphaned_entries) = orphaned_entries.take() {
-					entries.extend(orphaned_entries);
-				}
-				entries
 			};
 
 			let mut inner = inner.lock();

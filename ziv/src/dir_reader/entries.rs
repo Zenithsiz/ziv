@@ -219,16 +219,6 @@ impl<'a> Iterator for Iter<'a> {
 	}
 }
 
-impl Extend<DirEntry> for Entries {
-	fn extend<T: IntoIterator<Item = DirEntry>>(&mut self, iter: T) {
-		// TODO: indexset::BTreeSet doesn't have any way to batch insert, so we
-		//       just insert each one individually.
-		for entry in iter {
-			self.insert(entry);
-		}
-	}
-}
-
 impl IntoIterator for Entries {
 	type Item = DirEntry;
 
