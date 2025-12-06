@@ -60,7 +60,6 @@ pub struct DirReader {
 
 impl DirReader {
 	/// Creates a new directory reader
-	// TODO: Not need to drill the egui context through here?
 	pub fn new(path: PathBuf) -> Result<Self, AppError> {
 		let inner = Arc::new(Mutex::new(Inner {
 			sort_order:         SortOrder {
