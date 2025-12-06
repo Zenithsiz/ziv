@@ -24,7 +24,7 @@ use {
 	zutil_cloned::cloned,
 };
 
-#[derive(derive_more::Debug)]
+#[derive(Debug)]
 struct Inner {
 	path: Mutex<Arc<Path>>,
 
@@ -33,9 +33,7 @@ struct Inner {
 	metadata:          Mutex<Loadable<Arc<Metadata>>>,
 	image_kind:        Mutex<Loadable<ImageKind>>,
 	modified_date:     Mutex<Loadable<SystemTime>>,
-	#[debug(ignore)]
 	texture:           Mutex<Loadable<EntryImage>>,
-	#[debug(ignore)]
 	thumbnail_texture: Mutex<Loadable<EntryImage>>,
 	image_details:     Mutex<Option<ImageDetails>>,
 }
