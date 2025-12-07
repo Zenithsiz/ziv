@@ -1238,7 +1238,7 @@ dependencies = [
 [[package]]
 name = "egui-video"
 version = "0.9.0"
-source = "git+https://github.com/Zenithsiz/egui-video?rev=26a962298aeacfbc597515a2fd01460c6689adc4#26a962298aeacfbc597515a2fd01460c6689adc4"
+source = "git+https://github.com/Zenithsiz/egui-video?rev=850a86b8d5ecbcfa4b50c947b626186bf2e1dbde#850a86b8d5ecbcfa4b50c947b626186bf2e1dbde"
 dependencies = [
  "anyhow",
  "atomic",
@@ -5483,6 +5483,7 @@ dependencies = [
  "egui-video",
  "either",
  "extend",
+ "ffmpeg-next",
  "humansize",
  "image",
  "indexmap",

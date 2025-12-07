@@ -317,10 +317,10 @@ fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
 }
 
 fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
-	// TODO: Instead of only accepting a set list of extensions for video, can
-	//       we use `ffprobe` to check whether it's a video or not?
+	// Test against video file formats before we need to read the file.
+	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
 	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&
-		matches!(ext, "gif" | "mkv" | "mp4" | "webm")
+		COMMON_VIDEO_FORMATS.contains(&ext)
 	{
 		return Ok(ImageKind::Video);
 	}
@@ -333,13 +333,26 @@ fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
 		return Ok(ImageKind::Image { format });
 	}
 
-	// Otherwise, try to guess it by opening it
+	// Otherwise, try to guess it by opening it with `image`
 	let reader = ::image::ImageReader::open(path)
 		.context("Unable to create image reader")?
 		.with_guessed_format()
 		.context("Unable to read file")?;
 	if let Some(format) = reader.format() {
 		return Ok(ImageKind::Image { format });
+	}
+
+	// Then finally, try to guess it with `ffmpeg`.
+	// Note: This detects quite a few thing we don't want to open,
+	//       such as text files, so we ignore part of the output.
+	// TODO: Currently we detect `svg`s as a video format (using
+	//       `svg_pipe`). However, `image` doesn't support `svg`s,
+	//       so for now we allow this.
+	const DISALLOWED_VIDEO_FORMATS: &[&str] = &["lrc", "tty"];
+	if let Ok(input) = ffmpeg_next::format::input(path) &&
+		!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
+	{
+		return Ok(ImageKind::Video);
 	}
 
 	app_error::bail!("Unable to guess image kind");
