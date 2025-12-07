@@ -1007,6 +1007,28 @@ impl EguiApp {
 					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
 				}
 
+				ui.separator();
+
+				if ui.button("Copy path").clicked() {
+					// TODO: Not copy a lossy string?
+					ctx.send_cmd(egui::OutputCommand::CopyText(
+						cur_entry.path().to_string_lossy().into_owned(),
+					));
+				}
+
+				if ui.button("Copy file name").clicked() {
+					// TODO: Not copy a lossy string?
+					ctx.send_cmd(egui::OutputCommand::CopyText(
+						cur_entry
+							.file_name()
+							.expect("Entry had no file name")
+							.to_string_lossy()
+							.into_owned(),
+					));
+				}
+
+				ui.separator();
+
 				ui.menu_button("Sort order", |ui| {
 					let cur_sort_order = self.dir_reader.sort_order();
 					for &sort_order_kind in SortOrderKind::VARIANTS {
