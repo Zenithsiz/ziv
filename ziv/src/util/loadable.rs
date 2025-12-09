@@ -35,6 +35,24 @@ impl<T> Loadable<T> {
 		self.task_rx = None;
 	}
 
+	/// Tries to get the value.
+	///
+	/// If unloaded and no value ready from the task, returns `Ok(None)`
+	pub fn try_get(&mut self) -> Result<Option<&T>, AppError> {
+		// TODO: Use pattern matching once polonius comes around
+		if self.value.is_some() {
+			return Ok(Some(self.value.as_ref().expect("Just checked")));
+		}
+
+		let value = match self.task_rx.take() {
+			Some(rx) => rx.recv().map_err(|_| app_error!("Loading thread closed"))??,
+			None => return Ok(None),
+		};
+
+		let value = self.value.insert(value);
+		Ok(Some(value))
+	}
+
 	/// Loads this value, blocking until loaded.
 	pub fn load<F>(&mut self, load: F) -> Result<&T, AppError>
 	where

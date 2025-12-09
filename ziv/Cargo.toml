@@ -9,12 +9,12 @@ repository  = { workspace = true }
 [dependencies]
 
 app-error             = { workspace = true }
+bitflags              = { workspace = true }
 clap                  = { features = ["derive"], workspace = true }
 derive_more           = { features = ["full"], workspace = true }
 directories           = { workspace = true }
 eframe                = { workspace = true }
 egui                  = { features = ["serde"], workspace = true }
-egui-video            = { workspace = true }
 either                = { workspace = true }
 extend                = { workspace = true }
 ffmpeg-next           = { workspace = true }
@@ -23,6 +23,7 @@ image                 = { features = ["default-formats"], workspace = true }
 indexmap              = { workspace = true }
 indexset              = { workspace = true }
 itertools             = { workspace = true }
+libc                  = { workspace = true }
 md5                   = { workspace = true }
 natord                = { workspace = true }
 notify                = { workspace = true }

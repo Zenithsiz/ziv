@@ -16,12 +16,12 @@ version     = "0.1.0"
 ziv = { path = "ziv" }
 
 app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "e21d2eab03d97a675c4b44ccfa4df00e18d56ba7" }
+bitflags              = "2.10.0"
 clap                  = "4.5.47"
 derive_more           = "2.0.1"
 directories           = "6.0.0"
 eframe                = "0.33.2"
 egui                  = "0.33.2"
-egui-video            = { git = "https://github.com/Zenithsiz/egui-video", rev = "850a86b8d5ecbcfa4b50c947b626186bf2e1dbde" }
 either                = "1.15.0"
 extend                = "1.2.0"
 ffmpeg-next           = "8.0.0"
@@ -30,6 +30,7 @@ image                 = "0.25.6"
 indexmap              = "2.12.1"
 indexset              = "0.12.3"
 itertools             = "0.14.0"
+libc                  = "0.2.178"
 md5                   = "0.8.0"
 natord                = "1.0.9"
 notify                = "8.2.0"

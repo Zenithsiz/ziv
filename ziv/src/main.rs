@@ -16,7 +16,14 @@
 	impl_trait_in_assoc_type,
 	macro_derive,
 	yield_expr,
-	gen_blocks
+	gen_blocks,
+	array_windows,
+	thread_sleep_until,
+	try_trait_v2,
+	try_trait_v2_residual,
+	never_type,
+	string_replace_in_place,
+	formatting_options
 )]
 
 // Modules
@@ -38,7 +45,7 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{ImageDetails, ImageKind},
+			entry::{ImageDetails, ImageKind, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -47,7 +54,10 @@ use {
 	app_error::Context,
 	clap::Parser,
 	core::{mem, time::Duration},
-	egui::{Widget, emath::GuiRounding},
+	egui::{
+		Widget,
+		emath::{self, GuiRounding},
+	},
 	indexmap::IndexSet,
 	itertools::Itertools,
 	std::{
@@ -94,6 +104,8 @@ fn run() -> Result<(), AppError> {
 	logger.set_file(args.log_file.as_deref());
 
 	let thread_pool = PriorityThreadPool::new().context("Unable to create thread pool")?;
+
+	ffmpeg_next::init().context("Unable to initialize ffmpeg")?;
 
 	let path = match args.path {
 		Some(path) => path,
@@ -251,18 +263,17 @@ impl EguiApp {
 		util::config::save(&config, &self.config_path)
 	}
 
-	fn reset_on_change_entry(&mut self, ctx: &egui::Context, prev_entry: &CurEntry, new_entry: &CurEntry) {
+	fn reset_on_change_entry(&mut self, prev_entry: &CurEntry, new_entry: &CurEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
 			zoom:   0.0,
 		};
 		self.resized_image = false;
 
-		if let Ok(Some(video)) = prev_entry.video(&self.thread_pool, ctx) {
-			let mut video = video.lock();
-			if video.set_offscreen() {
-				video.player().stop();
-			}
+		if let Ok(Some(video)) = prev_entry.video_if_exists() &&
+			video.set_offscreen()
+		{
+			video.pause();
 		}
 
 		if self.loaded_entries.len() > self.max_loaded_entries {
@@ -692,6 +703,101 @@ impl EguiApp {
 		image_response
 	}
 
+	#[expect(clippy::unused_self, reason = "We might use it in the future")]
+	fn draw_video_controls(&self, ui: &mut egui::Ui, input: DrawInput<'_>, video: &dir_reader::entry::EntryVideo) {
+		let Some(duration) = video.duration() else { return };
+
+		let window_rect = input.window_response.rect;
+		let window_pos = window_rect.min;
+		let window_size = window_rect.size();
+
+		// Get the animation height scale
+		// TODO: We should always be active if hovering over the controls rectangle itself.
+		let is_hovering_window = ui.rect_contains_pointer(window_rect);
+		let is_pointer_stopped = ui.input(|input| input.pointer.time_since_last_movement()) > 1.0;
+		let height_animation_id = egui::Id::new("video-controls-animation");
+		let height_animation_time = 0.15;
+		let height_animation_active = is_hovering_window && !is_pointer_stopped;
+		let height_animation_scale = ui.ctx().animate_bool_with_time_and_easing(
+			height_animation_id,
+			height_animation_active,
+			height_animation_time,
+			emath::easing::quadratic_in,
+		);
+		if height_animation_scale <= 0.0 {
+			return;
+		}
+
+		// Note: Label height is always constant to avoid the text clipping.
+		let label_height = ui.text_style_height(&egui::TextStyle::Body);
+		let slider_height = window_size.y * 0.025 * height_animation_scale;
+
+		// Draw the controls background
+		let controls_rect = {
+			let height = label_height + slider_height;
+			let size = egui::vec2(window_size.x, height);
+			egui::Rect::from_min_size(window_pos + (window_size - size), size)
+		};
+		let controls_bg = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 50);
+		ui.painter().rect_filled(controls_rect, 0.0, controls_bg);
+
+		// Draw the info
+		let label_size = egui::vec2(controls_rect.width(), label_height);
+		let label_rect = egui::Rect::from_min_size(controls_rect.min, label_size);
+		let label_text = format!(
+			"{:.2?} / {:.2?}",
+			util::format_duration(video.cur_time()),
+			util::format_duration(duration)
+		);
+		let label = egui::Label::new(label_text);
+		{
+			let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(label_rect));
+			ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
+			ui.add(label);
+		}
+
+
+		// Draw the slider
+		let mut cur_time_secs = video.cur_time().as_secs_f64();
+		let slider = egui::Slider::new(&mut cur_time_secs, 0.0..=duration.as_secs_f64())
+			.smart_aim(false)
+			.show_value(false);
+
+		let slider_rect = {
+			let slider_width = controls_rect.width();
+			let slider_size = egui::vec2(slider_width, slider_height);
+			egui::Rect::from_min_size(
+				controls_rect.min + (controls_rect.size() - slider_size) / egui::vec2(2.0, 1.0),
+				slider_size,
+			)
+		};
+		let slider_bg = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100);
+		let slider_trailing_bg = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 50);
+		let response = {
+			let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(slider_rect));
+			let style = ui.style_mut();
+			style.spacing.slider_width = slider_rect.width();
+			style.spacing.slider_rail_height = slider_rect.height();
+			style.spacing.interact_size.y = slider_rect.height();
+			style.visuals.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.0 };
+			style.visuals.slider_trailing_fill = true;
+			style.visuals.selection.bg_fill = slider_trailing_bg;
+			style.visuals.widgets.inactive.bg_fill = slider_bg;
+			ui.add(slider)
+		};
+
+		// While dragging, start seeking
+		match response.dragged() {
+			true => video.set_seeking(),
+			false => video.stop_seeking(),
+		}
+
+		// Then, if changed seek to it.
+		if response.changed() {
+			video.seek_to(Duration::from_secs_f64(cur_time_secs));
+		}
+	}
+
 	/// Draws an entry
 	fn draw_entry(&mut self, ui: &mut egui::Ui, input: DrawInput) -> DrawOutput {
 		let mut output = DrawOutput {
@@ -736,32 +842,32 @@ impl EguiApp {
 					});
 					return output;
 				};
+				let image_size = video.size();
+				if image_size == egui::Vec2::ZERO {
+					ui.centered_and_justified(|ui| {
+						ui.weak("Loading...");
+					});
+					return output;
+				}
 
 				// If it wasn't on-screen, start playing it and resize
-				let mut video = video.lock();
+				// TODO: This isn't always what we want, if the user paused it,
+				//       then went to another image and came back, we probably
+				//       don't want to be playing.
 				if !video.set_onscreen() {
-					let player = video.player();
-					match player.player_state.get() {
-						egui_video::PlayerState::Paused => player.resume(),
-						_ => player.start(),
-					}
-					output.resize_size = Some(player.size);
+					video.resume();
+					output.resize_size = Some(image_size);
 				}
-				let player = video.player();
 
 				if input.toggle_pause {
-					match player.player_state.get() {
-						egui_video::PlayerState::Paused => player.resume(),
-						egui_video::PlayerState::Playing => player.pause(),
-						_ => (),
+					match video.playing_status() {
+						PlayingStatus::Playing => video.pause(),
+						PlayingStatus::Paused => video.resume(),
+						PlayingStatus::Seeking { .. } => (),
 					}
 				}
 
-				let image_size = player.size;
-				let image = player
-					.generate_frame_image(image_size)
-					.maintain_aspect_ratio(true)
-					.fit_to_exact_size(ui.available_size());
+				let image = egui::Image::from_texture(video.texture()).sense(egui::Sense::click());
 
 				output.image_response = Some(Self::draw_image(
 					ui,
@@ -773,23 +879,14 @@ impl EguiApp {
 					vertical_pan,
 					&self.controls,
 				));
+				self.draw_video_controls(ui, input, &video);
 
-				player.render_controls(ui, input.window_response);
-				player.process_state();
-
-				if !input.entry.has_image_details() {
-					let duration_ms = match u64::try_from(player.duration_ms) {
-						Ok(duration) => duration,
-						Err(_) => {
-							tracing::warn!("Video duration was negative: {}ms", player.duration_ms);
-							0
-						},
-					};
-					drop(video);
-
+				if !input.entry.has_image_details() &&
+					let Some(duration) = video.duration()
+				{
 					input.entry.set_image_details(ImageDetails::Video {
-						size:     image_size,
-						duration: Duration::from_millis(duration_ms),
+						size: image_size,
+						duration,
 					});
 				}
 			},
@@ -911,7 +1008,8 @@ impl EguiApp {
 			move_first = input.consume_shortcut_key(self.shortcuts.first);
 			move_last = input.consume_shortcut_key(self.shortcuts.last);
 
-			toggle_pause = input.consume_shortcut_key(self.shortcuts.toggle_pause);
+			toggle_pause |= input.consume_shortcut_key(self.shortcuts.toggle_pause);
+			toggle_pause |= input.pointer.button_clicked(egui::PointerButton::Primary);
 
 			// Note: The order is important here, because by default `pan_up` and `fit_width_if_default`
 			//       use the same key, so if we consumed it here before checking whether it's
@@ -954,19 +1052,19 @@ impl EguiApp {
 
 		if move_prev && let Some(entry) = self.dir_reader.cur_entry_set_prev() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry, &cur_entry);
 		}
 		if move_next && let Some(entry) = self.dir_reader.cur_entry_set_next() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry, &cur_entry);
 		}
 		if move_first && let Some(entry) = self.dir_reader.cur_entry_set_first() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry, &cur_entry);
 		}
 		if move_last && let Some(entry) = self.dir_reader.cur_entry_set_last() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(ctx, &prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry, &cur_entry);
 		}
 
 		let cur_entry = cur_entry;
@@ -1098,12 +1196,10 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Ok(Some(video)) = cur_entry.video(&self.thread_pool, ctx)
+			let Ok(Some(video)) = cur_entry.video_if_exists() &&
+			video.set_offscreen()
 		{
-			let mut video = video.lock();
-			if video.set_offscreen() {
-				video.player().pause();
-			}
+			video.pause();
 		}
 
 		egui::TopBottomPanel::top("display-list-controls")

@@ -207,6 +207,11 @@ impl DirEntry {
 			.map(Option::<&_>::cloned)
 	}
 
+	/// Returns this image's video, without loading it
+	pub fn video_if_exists(&self) -> Result<Option<EntryVideo>, AppError> {
+		self.0.video.lock().try_get().map(Option::<&_>::cloned)
+	}
+
 	/// Removes this image's video
 	pub fn remove_video(&self) {
 		self.0.video.lock().remove();

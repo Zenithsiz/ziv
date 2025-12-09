@@ -2,82 +2,511 @@
 
 // Imports
 use {
-	crate::util::AppError,
+	crate::util::{AppError, InstantSaturatingOps, TryControlFlow},
 	app_error::Context,
-	parking_lot::{Mutex, MutexGuard},
-	std::{fmt, path::Path, sync::Arc},
+	core::{mem, time::Duration},
+	ffmpeg_next::Rescale,
+	parking_lot::{Condvar, Mutex},
+	std::{path::Path, sync::Arc, time::Instant},
+	zutil_cloned::cloned,
 };
 
-struct Inner {
-	player:   egui_video::Player,
-	onscreen: bool,
+#[derive(Clone, Debug)]
+pub enum PlayingStatus {
+	Playing,
+	Paused,
+	Seeking {
+		/// Whether we've already presented the frame we seeked to
+		presented: bool,
+
+		/// Previous status
+		// TODO: Not box it and just indicate whether it was playing/paused?
+		prev: Box<Self>,
+	},
 }
 
-impl fmt::Debug for Inner {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("EntryVideo")
-			.field("handle", &self.player.texture_handle.id())
-			.field("on_screen", &self.onscreen)
-			.finish()
-	}
+#[derive(Debug)]
+struct State {
+	onscreen:       bool,
+	playing_status: PlayingStatus,
+	duration:       Option<Duration>,
+	start_time:     Option<Instant>,
+	cur_time:       Duration,
+	seek_to:        Option<Duration>,
+}
+
+#[derive(derive_more::Debug)]
+struct Inner {
+	#[debug("{:?}", self.texture_handle.id())]
+	texture_handle: egui::TextureHandle,
+	state:          Mutex<State>,
+	condvar:        Condvar,
 }
 
 /// Entry video
 #[derive(Clone, Debug)]
 pub struct EntryVideo {
-	inner: Arc<Mutex<Inner>>,
+	inner: Arc<Inner>,
 }
 
 impl EntryVideo {
 	/// Creates a new video, not playing
-	pub fn new(egui_ctx: &egui::Context, path: &Path) -> Result<Self, AppError> {
-		let player = egui_video::Player::new(egui_ctx, path.to_path_buf())
-			.map_err(|err| AppError::from(&*err.into_boxed_dyn_error()))
-			.context("Unable to create player")?;
+	#[expect(clippy::unnecessary_wraps, reason = "We'll be fallible eventually")]
+	pub fn new(egui_ctx: &egui::Context, path: &Arc<Path>) -> Result<Self, AppError> {
+		// TODO: This filter should be customizable
+		let options = egui::TextureOptions::LINEAR;
+		let texture_handle = egui_ctx.load_texture(
+			path.display().to_string(),
+			egui::ColorImage::filled([0, 0], egui::Color32::BLACK),
+			options,
+		);
 
-		Ok(Self {
-			inner: Arc::new(Mutex::new(Inner {
-				player,
-				onscreen: false,
-			})),
-		})
+		let inner = Arc::new(Inner {
+			texture_handle,
+			state: Mutex::new(State {
+				onscreen:       false,
+				// TODO: Should we start playing?
+				playing_status: PlayingStatus::Playing,
+				duration:       None,
+				start_time:     None,
+				cur_time:       Duration::ZERO,
+				seek_to:        None,
+			}),
+			condvar: Condvar::new(),
+		});
+
+		#[cloned(path, inner)]
+		let _ = std::thread::spawn(move || {
+			let res: Result<_, AppError> = try {
+				let mut thread = DecoderThread::new(inner, &path)?;
+				thread.run()?
+			};
+
+			match res {
+				Ok(()) => tracing::debug!("Video decoder thread successfully returned"),
+				Err(err) => tracing::warn!("Unable to decode video: {err:?}"),
+			}
+		});
+
+		Ok(Self { inner })
 	}
 
-	/// Locks this video
-	pub fn lock(&self) -> EntryVideoGuard<'_> {
-		EntryVideoGuard(self.inner.lock())
+	/// Returns the size of the video
+	pub fn size(&self) -> egui::Vec2 {
+		self.inner.texture_handle.size_vec2()
 	}
-}
 
-#[derive(Debug)]
-pub struct EntryVideoGuard<'a>(MutexGuard<'a, Inner>);
-
-impl EntryVideoGuard<'_> {
-	/// Returns the player
-	pub fn player(&mut self) -> &mut egui_video::Player {
-		&mut self.0.player
+	/// Returns the texture
+	pub fn texture(&self) -> egui::load::SizedTexture {
+		egui::load::SizedTexture::from_handle(&self.inner.texture_handle)
 	}
 
 	/// Sets this video as on-screen.
 	///
 	/// Returns whether we were already on-screen
-	pub fn set_onscreen(&mut self) -> bool {
-		match self.0.onscreen {
-			true => true,
-			false => {
-				self.0.onscreen = true;
-				false
-			},
-		}
+	pub fn set_onscreen(&self) -> bool {
+		mem::replace(&mut self.inner.state.lock().onscreen, true)
 	}
 
 	/// Sets this video as off-screen
 	///
 	/// Returns whether we were on-screen
-	pub fn set_offscreen(&mut self) -> bool {
-		let was_onscreen = self.0.onscreen;
-		self.0.onscreen = false;
+	pub fn set_offscreen(&self) -> bool {
+		mem::replace(&mut self.inner.state.lock().onscreen, false)
+	}
 
-		was_onscreen
+	/// Returns the video playing status
+	pub fn playing_status(&self) -> PlayingStatus {
+		self.inner.state.lock().playing_status.clone()
+	}
+
+	/// Pauses the video
+	pub fn pause(&self) {
+		self.inner.state.lock().playing_status = PlayingStatus::Paused;
+		self.inner.condvar.notify_one();
+	}
+
+	/// Resumes the video
+	pub fn resume(&self) {
+		let mut state = self.inner.state.lock();
+		state.playing_status = PlayingStatus::Playing;
+		state.start_time = None;
+		drop(state);
+		self.inner.condvar.notify_one();
+	}
+
+	/// Starts seeking the video
+	pub fn set_seeking(&self) {
+		let mut state = self.inner.state.lock();
+		match state.playing_status {
+			PlayingStatus::Seeking { .. } => (),
+			_ =>
+				state.playing_status = PlayingStatus::Seeking {
+					presented: false,
+					prev:      Box::new(state.playing_status.clone()),
+				},
+		}
+		drop(state);
+
+		self.inner.condvar.notify_one();
+	}
+
+	/// Stops seeking the video
+	pub fn stop_seeking(&self) {
+		let mut state = self.inner.state.lock();
+		if let PlayingStatus::Seeking { prev, .. } = state.playing_status.clone() {
+			state.playing_status = *prev;
+		}
+		drop(state);
+
+		self.inner.condvar.notify_one();
+	}
+
+	/// Returns the duration of the video, if any
+	pub fn duration(&self) -> Option<Duration> {
+		self.inner.state.lock().duration
+	}
+
+	/// Returns the current time of the video
+	pub fn cur_time(&self) -> Duration {
+		self.inner.state.lock().cur_time
+	}
+
+	/// Seeks to a time in the video.
+	pub fn seek_to(&self, time: Duration) {
+		let mut state = self.inner.state.lock();
+		state.seek_to = Some(time);
+		if let PlayingStatus::Seeking { presented, .. } = &mut state.playing_status {
+			*presented = false;
+		}
+		drop(state);
+
+		self.inner.condvar.notify_one();
+	}
+}
+
+struct DecoderThread {
+	inner:   Arc<Inner>,
+	input:   ffmpeg_next::format::context::Input,
+	decoder: ffmpeg_next::decoder::Video,
+	scaler:  ffmpeg_next::software::scaling::context::Context,
+
+	video_stream_idx:       usize,
+	video_stream_time_base: ffmpeg_next::Rational,
+}
+
+#[expect(
+	clippy::match_same_arms,
+	clippy::needless_continue,
+	reason = "We want control flow to be explicit here"
+)]
+impl DecoderThread {
+	/// Creates the decoder thread state
+	fn new(inner: Arc<Inner>, path: &Path) -> Result<Self, AppError> {
+		// Open the input
+		let input = ffmpeg_next::format::input(path).context("Unable to open video")?;
+
+		// Get the video stream
+		let video_stream = input
+			.streams()
+			.best(ffmpeg_next::media::Type::Video)
+			.context("No video streams found")?;
+		let video_stream_idx = video_stream.index();
+		let video_stream_time_base = video_stream.time_base();
+
+		// Write it's duration
+		let duration_us = input.duration().rescale(TIME_BASE_AV, TIME_BASE_MICROS);
+		if let Ok(duration_us) = u64::try_from(duration_us) {
+			let duration = Duration::from_micros(duration_us);
+			inner.state.lock().duration = Some(duration);
+		}
+
+		// Create a decoder
+		let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
+			.context("Unable to build decoder")?;
+		let decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
+
+		// And a scaler
+		let scaler = ffmpeg_next::software::scaling::context::Context::get(
+			decoder.format(),
+			decoder.width(),
+			decoder.height(),
+			ffmpeg_next::format::Pixel::RGBA,
+			decoder.width(),
+			decoder.height(),
+			ffmpeg_next::software::scaling::Flags::BILINEAR,
+		)
+		.context("Unable to build scaler")?;
+
+		Ok(Self {
+			inner,
+			input,
+			decoder,
+			scaler,
+			video_stream_idx,
+			video_stream_time_base,
+		})
+	}
+
+	/// Runs the thread
+	fn run(&mut self) -> Result<(), AppError> {
+		// Note: This loop plays the video, rewinding once it reaches the end
+		loop {
+			// Note: This loops reads the packets and frames until eof
+			loop {
+				// Note: Even if we just seeked, we can just continue
+				let _events = self.handle_events()?;
+
+				// Get the next packet for the video stream
+				let Some((stream, packet)) = self.input.packets().next() else {
+					break;
+				};
+				if stream.index() != self.video_stream_idx {
+					continue;
+				}
+
+				// Send the packet to the decoder and receive it's frames
+				// Note: If `frame_res` is `Seeked`, we can just continue.
+				self.decoder
+					.send_packet(&packet)
+					.context("Unable to send packet to decoder")?;
+				match self.receive_frames()? {
+					// If we seeked, we can just go back to getting packets
+					FrameRes::Seeked => continue,
+					FrameRes::DecoderWaitPacket => continue,
+					FrameRes::DecoderEof => unreachable!("Received unexpected EOF from decoder"),
+				}
+			}
+
+			// After reaching eof, send it to the decoder,
+			// and receive any remaining frames
+			self.decoder.send_eof().context("Unable to send eof to decoder")?;
+			match self.receive_frames()? {
+				// If we seeked, just continue getting frames again
+				FrameRes::Seeked => continue,
+				FrameRes::DecoderWaitPacket => unreachable!("Decoder was expected frames after EOF"),
+				// If we reached EOF, rewind back to the beginning
+				FrameRes::DecoderEof => self.seek_to(Duration::ZERO).context("Unable to rewind input")?,
+			}
+		}
+	}
+
+	fn receive_frames(&mut self) -> TryControlFlow<FrameRes, (), AppError> {
+		let mut frame_raw = ffmpeg_next::frame::Video::empty();
+		loop {
+			// Wait until we're unpaused.
+			match self.wait_unpaused()? {
+				// Note: If we seeked, we'll need to get more frames, so return
+				WaitRes::Seeked => return TryControlFlow::Continue(FrameRes::Seeked),
+				WaitRes::Finished => (),
+			}
+
+			// Then receive the frame
+			match self.decoder.receive_frame(&mut frame_raw) {
+				Ok(()) => (),
+				Err(ffmpeg_next::Error::Other { errno: libc::EAGAIN }) =>
+					return TryControlFlow::Continue(FrameRes::DecoderWaitPacket),
+				Err(ffmpeg_next::Error::Eof) => return TryControlFlow::Continue(FrameRes::DecoderEof),
+				Err(err) => return TryControlFlow::BreakErr(AppError::new(&err).context("Decoder returned an error")),
+			}
+
+			// Get and adjust the pts
+			// TODO: What does it mean for a frame to not have a pts?
+			//       Should we be using dts instead?
+			let Some(pts_raw) = frame_raw.pts() else {
+				tracing::warn!("Frame had no pts, skipping");
+				continue;
+			};
+			let pts_us = pts_raw.rescale(self.video_stream_time_base, TIME_BASE_MICROS);
+			let Ok(pts_us) = u64::try_from(pts_us) else {
+				tracing::warn!("Frame pts was negative: {pts_us}, skipping");
+				continue;
+			};
+			let pts = Duration::from_micros(pts_us);
+
+			// If the frame is in the past, discard it
+			// Note: This can happen because the seeks aren't exact, and so
+			//       we might have been put a bit before our actual time.
+			let cur_time = self.inner.state.lock().cur_time;
+			if pts < cur_time {
+				continue;
+			}
+
+			// Get when the frame starts and sleep until it does
+			let Some(frame_start_time) = self
+				.inner
+				.state
+				.lock()
+				.start_time
+				.get_or_insert_with(|| Instant::now().saturating_sub(cur_time))
+				.checked_add(pts)
+			else {
+				tracing::warn!("Frame pts overflowed an instant: {pts:?}, skipping");
+				continue;
+			};
+
+			// Wait until the frame starts before rendering
+			// Note: If we just seeked, discard it and return
+			match self.wait_until(frame_start_time)? {
+				WaitRes::Seeked => return TryControlFlow::Continue(FrameRes::Seeked),
+				WaitRes::Finished => (),
+			}
+			self.inner.state.lock().cur_time = pts;
+
+			// Once we arrive, update the current time and send the frame back
+			let mut frame = ffmpeg_next::frame::Video::empty();
+			self.scaler
+				.run(&frame_raw, &mut frame)
+				.context("Unable to scale frame")?;
+
+			let width = frame.width() as usize;
+			let height = frame.height() as usize;
+			let size = [width, height];
+			let mut pixels = Vec::with_capacity(width * height);
+
+			let data = frame.data(0);
+			let stride = frame.stride(0);
+			for y in 0..height {
+				let start = y * stride;
+				let data = &data[start..][..4 * width];
+				pixels.extend(
+					data.iter()
+						.copied()
+						.array_chunks()
+						.map(|[r, g, b, a]| egui::Color32::from_rgba_premultiplied(r, g, b, a)),
+				);
+			}
+			let image = egui::ColorImage {
+				size,
+				source_size: egui::vec2(width as f32, height as f32),
+				pixels,
+			};
+
+			// TODO: This filter should be customizable
+			let options = egui::TextureOptions::LINEAR;
+			self.inner.texture_handle.clone().set(image, options);
+
+			let mut state = self.inner.state.lock();
+			if let PlayingStatus::Seeking { presented, .. } = &mut state.playing_status {
+				*presented = true;
+			}
+		}
+	}
+
+	fn seek_to(&mut self, time: Duration) -> Result<(), AppError> {
+		// Seek on the input and flush the decoder
+		// Note: `input.seek` uses `-1` for the stream index, so the time base is `AV_TIME_BASE`.
+		let time_us = i64::try_from(time.as_micros()).context("Time as micros did not fit into an `i64`")?;
+		let time_us = time_us.rescale(TIME_BASE_MICROS, TIME_BASE_AV);
+		self.input.seek(time_us, ..time_us).context("Unable to seek input")?;
+		self.decoder.flush();
+
+		// Then set the correct time on ourselves
+		let mut state = self.inner.state.lock();
+		state.start_time = None;
+		state.cur_time = time;
+		drop(state);
+
+		Ok(())
+	}
+
+	/// Handles events, returning any user event
+	fn handle_events(&mut self) -> TryControlFlow<UserEvent, (), AppError> {
+		// Check if we should quit.
+		// TODO: We should probably use a better metric than this
+		let should_quit = Arc::strong_count(&self.inner) <= 1;
+		if should_quit {
+			return TryControlFlow::BreakOk(());
+		}
+
+		let mut events = UserEvent::empty();
+
+		// Check if we need to seek
+		// TODO: Should we make the caller seek instead of us?
+		let (seek_to, cur_time) = {
+			let mut state = self.inner.state.lock();
+			(state.seek_to.take(), state.cur_time)
+		};
+		if let Some(time) = seek_to &&
+			time != cur_time
+		{
+			events |= UserEvent::SEEK;
+
+			if let Err(err) = self.seek_to(time) {
+				tracing::warn!("Unable to seek to {time:?}: {err:?}");
+			}
+		}
+
+		TryControlFlow::Continue(events)
+	}
+
+	/// Waits until `end`
+	fn wait_until(&mut self, end: Instant) -> TryControlFlow<WaitRes, (), AppError> {
+		loop {
+			let events = self.handle_events()?;
+			if events.contains(UserEvent::SEEK) {
+				break TryControlFlow::Continue(WaitRes::Seeked);
+			}
+
+			let res = self.inner.condvar.wait_until(&mut self.inner.state.lock(), end);
+			if res.timed_out() {
+				break TryControlFlow::Continue(WaitRes::Finished);
+			}
+		}
+	}
+
+	/// Waits until unpaused
+	fn wait_unpaused(&mut self) -> TryControlFlow<WaitRes, (), AppError> {
+		loop {
+			let events = self.handle_events()?;
+			if events.contains(UserEvent::SEEK) {
+				break TryControlFlow::Continue(WaitRes::Seeked);
+			}
+
+			let mut state = self.inner.state.lock();
+			match state.playing_status {
+				PlayingStatus::Playing | PlayingStatus::Seeking { presented: false, .. } =>
+					break TryControlFlow::Continue(WaitRes::Finished),
+				PlayingStatus::Paused | PlayingStatus::Seeking { presented: true, .. } =>
+					self.inner.condvar.wait(&mut state),
+			}
+		}
+	}
+}
+
+const TIME_BASE_AV: ffmpeg_next::Rational = ffmpeg_next::Rational(1, ffmpeg_next::ffi::AV_TIME_BASE);
+const TIME_BASE_MICROS: ffmpeg_next::Rational = ffmpeg_next::Rational(1, 1_000_000);
+
+/// Result from decoding a frame
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[must_use]
+enum FrameRes {
+	/// User seeked
+	Seeked,
+
+	/// Decoder needs more packets
+	DecoderWaitPacket,
+
+	/// Decoder received an eof
+	DecoderEof,
+}
+
+/// Result from waiting
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[must_use]
+enum WaitRes {
+	/// Seeked while waiting
+	Seeked,
+
+	/// Finished waiting
+	Finished,
+}
+
+bitflags::bitflags! {
+	/// User events
+	#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+	#[must_use]
+	struct UserEvent: u32 {
+		const SEEK = 1 << 0;
 	}
 }

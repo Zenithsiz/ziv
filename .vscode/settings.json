@@ -1,5 +1,6 @@
 {
 	"cSpell.words": [
+		"EAGAIN",
 		"eframe",
 		"egui",
 		"emath",
@@ -8,6 +9,7 @@
 		"indexmap",
 		"indexset",
 		"natord",
+		"seeked",
 		"walkdir",
 		"zutil"
 	]
