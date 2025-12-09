@@ -134,6 +134,7 @@ impl DirEntry {
 				metadata.modified().context("Unable to get modified date")
 			})
 			.copied()
+			.map_err(AppError::clone)
 	}
 
 	/// Returns the image details of this entry
@@ -184,6 +185,7 @@ impl DirEntry {
 				EntryImage::new(&egui_ctx, &this.path(), format)
 			})
 			.map(Option::<&_>::cloned)
+			.map_err(AppError::clone)
 	}
 
 	/// Removes this image's texture
@@ -205,11 +207,17 @@ impl DirEntry {
 				EntryVideo::new(&egui_ctx, &this.path())
 			})
 			.map(Option::<&_>::cloned)
+			.map_err(AppError::clone)
 	}
 
 	/// Returns this image's video, without loading it
 	pub fn video_if_exists(&self) -> Result<Option<EntryVideo>, AppError> {
-		self.0.video.lock().try_get().map(Option::<&_>::cloned)
+		self.0
+			.video
+			.lock()
+			.try_get()
+			.map(Option::<&_>::cloned)
+			.map_err(AppError::clone)
 	}
 
 	/// Removes this image's video
@@ -233,6 +241,7 @@ impl DirEntry {
 				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), kind)
 			})
 			.map(Option::<&_>::cloned)
+			.map_err(AppError::clone)
 	}
 
 	/// Removes this image's thumbnail texture

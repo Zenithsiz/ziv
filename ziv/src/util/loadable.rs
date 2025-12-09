@@ -1,20 +1,17 @@
 //! A loadable value
 
 // Imports
-use {
-	super::{AppError, PriorityThreadPool, priority_thread_pool::Priority},
-	app_error::app_error,
-};
+use super::{AppError, PriorityThreadPool, priority_thread_pool::Priority};
 
 /// Loadable value
 // TODO: Move interior mutability to this?
 #[derive(Debug)]
-pub struct Loadable<T> {
-	value:   Option<T>,
-	task_rx: Option<oneshot::Receiver<Result<T, AppError>>>,
+pub struct Loadable<T, E = AppError> {
+	value:   Option<Result<T, E>>,
+	task_rx: Option<oneshot::Receiver<Result<T, E>>>,
 }
 
-impl<T> Loadable<T> {
+impl<T, E> Loadable<T, E> {
 	/// Creates a new, empty, loadable
 	pub const fn new() -> Self {
 		Self {
@@ -25,7 +22,7 @@ impl<T> Loadable<T> {
 
 	/// Sets the value, and removing the task loading it, if any
 	pub fn set(&mut self, value: T) {
-		self.value = Some(value);
+		self.value = Some(Ok(value));
 		self.task_rx = None;
 	}
 
@@ -38,39 +35,39 @@ impl<T> Loadable<T> {
 	/// Tries to get the value.
 	///
 	/// If unloaded and no value ready from the task, returns `Ok(None)`
-	pub fn try_get(&mut self) -> Result<Option<&T>, AppError> {
+	pub fn try_get(&mut self) -> Result<Option<&T>, &E> {
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
-			return Ok(Some(self.value.as_ref().expect("Just checked")));
+			return self.value.as_ref().expect("Just checked").as_ref().map(Some);
 		}
 
-		let value = match self.task_rx.take() {
-			Some(rx) => rx.recv().map_err(|_| app_error!("Loading thread closed"))??,
+		let res = match self.task_rx.take() {
+			Some(rx) => rx.recv().expect("Loading thread panicked"),
 			None => return Ok(None),
 		};
 
-		let value = self.value.insert(value);
-		Ok(Some(value))
+		let res = self.value.insert(res);
+		res.as_ref().map(Some)
 	}
 
 	/// Loads this value, blocking until loaded.
-	pub fn load<F>(&mut self, load: F) -> Result<&T, AppError>
+	pub fn load<F>(&mut self, load: F) -> Result<&T, &E>
 	where
 		T: Send,
-		F: FnOnce() -> Result<T, AppError> + Send,
+		F: FnOnce() -> Result<T, E> + Send,
 	{
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
-			return Ok(self.value.as_ref().expect("Just checked"));
+			return self.value.as_ref().expect("Just checked").as_ref();
 		}
 
-		let value = match self.task_rx.take() {
-			Some(rx) => rx.recv().map_err(|_| app_error!("Loading thread closed"))??,
-			None => load()?,
+		let res = match self.task_rx.take() {
+			Some(rx) => rx.recv().expect("Loading thread panicked"),
+			None => load(),
 		};
 
-		let value = self.value.insert(value);
-		Ok(value)
+		let res = self.value.insert(res);
+		res.as_ref()
 	}
 
 	/// Tries to load the value
@@ -79,25 +76,25 @@ impl<T> Loadable<T> {
 		thread_pool: &PriorityThreadPool,
 		priority: Priority,
 		load: F,
-	) -> Result<Option<&T>, AppError>
+	) -> Result<Option<&T>, &E>
 	where
 		T: Send + 'static,
-		F: FnOnce() -> Result<T, AppError> + Send + 'static,
+		E: Send + 'static,
+		F: FnOnce() -> Result<T, E> + Send + 'static,
 	{
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
-			return Ok(Some(self.value.as_ref().expect("Just checked")));
+			return self.value.as_ref().expect("Just checked").as_ref().map(Some);
 		}
 
 		match &self.task_rx {
 			Some(task_rx) => match task_rx.try_recv() {
 				Ok(res) => {
 					self.task_rx = None;
-					let value = res?;
-					Ok(Some(self.value.insert(value)))
+					self.value.insert(res).as_ref().map(Some)
 				},
 				Err(oneshot::TryRecvError::Empty) => Ok(None),
-				Err(oneshot::TryRecvError::Disconnected) => app_error::bail!("Loading thread closed"),
+				Err(oneshot::TryRecvError::Disconnected) => panic!("Loading thread panicked"),
 			},
 			None => {
 				let (task_tx, task_rx) = oneshot::channel();
