@@ -798,6 +798,28 @@ impl EguiApp {
 		}
 	}
 
+	fn preload_entry_inner(&self, egui_ctx: &egui::Context, entry: &DirEntry) -> Result<(), AppError> {
+		let Some(kind) = entry.try_image_kind(&self.thread_pool)? else {
+			return Ok(());
+		};
+
+		match kind {
+			ImageKind::Image { .. } => _ = entry.texture(&self.thread_pool, egui_ctx)?,
+			ImageKind::Video => _ = entry.video(&self.thread_pool, egui_ctx)?,
+		}
+
+		Ok(())
+	}
+
+	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: DirEntry) {
+		if let Err(err) = self.preload_entry_inner(egui_ctx, &entry) {
+			tracing::warn!("Unable to load image {:?}, removing: {err:?}", entry.path());
+			self.dir_reader.remove(&entry);
+		}
+
+		self.loaded_entries.insert(entry);
+	}
+
 	/// Draws an entry
 	fn draw_entry(&mut self, ui: &mut egui::Ui, input: DrawInput) -> DrawOutput {
 		let mut output = DrawOutput {
@@ -924,8 +946,7 @@ impl EguiApp {
 								continue;
 							}
 
-							_ = entry.texture(&self.thread_pool, ui.ctx());
-							self.loaded_entries.insert(entry);
+							self.preload_entry(ui.ctx(), entry);
 						}
 					}
 
@@ -936,8 +957,7 @@ impl EguiApp {
 							.entry_range((entries_len - idx).saturating_sub(self.preload_prev)..)
 					{
 						for entry in entries {
-							_ = entry.texture(&self.thread_pool, ui.ctx());
-							self.loaded_entries.insert(entry);
+							self.preload_entry(ui.ctx(), entry);
 						}
 					}
 					if idx + self.preload_next >= entries_len &&
@@ -946,8 +966,7 @@ impl EguiApp {
 							.entry_range(..=(self.preload_next - (entries_len - idx)).min(entries_len))
 					{
 						for entry in entries {
-							_ = entry.texture(&self.thread_pool, ui.ctx());
-							self.loaded_entries.insert(entry);
+							self.preload_entry(ui.ctx(), entry);
 						}
 					}
 				}
