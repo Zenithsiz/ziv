@@ -4,7 +4,6 @@
 use super::{AppError, PriorityThreadPool, priority_thread_pool::Priority};
 
 /// Loadable value
-// TODO: Move interior mutability to this?
 #[derive(Debug)]
 pub struct Loadable<T, E = AppError> {
 	value:   Option<Result<T, E>>,

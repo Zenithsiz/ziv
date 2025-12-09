@@ -37,40 +37,38 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	path: Mutex<Arc<Path>>,
+	path: Arc<Path>,
 
-	// TODO: Move all interior mutability inside of loadable to avoid holding
-	//       the locks for longer than necessary
-	metadata:          Mutex<Loadable<Arc<Metadata>>>,
-	image_kind:        Mutex<Loadable<ImageKind>>,
-	modified_date:     Mutex<Loadable<SystemTime>>,
-	texture:           Mutex<Loadable<EntryImage>>,
-	video:             Mutex<Loadable<EntryVideo>>,
-	thumbnail_texture: Mutex<Loadable<EntryImage>>,
-	image_details:     Mutex<Option<ImageDetails>>,
+	metadata:          Loadable<Arc<Metadata>>,
+	image_kind:        Loadable<ImageKind>,
+	modified_date:     Loadable<SystemTime>,
+	texture:           Loadable<EntryImage>,
+	video:             Loadable<EntryVideo>,
+	thumbnail_texture: Loadable<EntryImage>,
+	image_details:     Option<ImageDetails>,
 }
 
 #[derive(Clone, derive_more::Debug)]
-pub struct DirEntry(Arc<Inner>);
+pub struct DirEntry(Arc<Mutex<Inner>>);
 
 impl DirEntry {
 	/// Creates a new directory entry
 	pub(super) fn new(path: impl Into<Arc<Path>>) -> Self {
-		Self(Arc::new(Inner {
-			path:              Mutex::new(path.into()),
-			metadata:          Mutex::new(Loadable::new()),
-			image_kind:        Mutex::new(Loadable::new()),
-			modified_date:     Mutex::new(Loadable::new()),
-			texture:           Mutex::new(Loadable::new()),
-			video:             Mutex::new(Loadable::new()),
-			thumbnail_texture: Mutex::new(Loadable::new()),
-			image_details:     Mutex::new(None),
-		}))
+		Self(Arc::new(Mutex::new(Inner {
+			path:              path.into(),
+			metadata:          Loadable::new(),
+			image_kind:        Loadable::new(),
+			modified_date:     Loadable::new(),
+			texture:           Loadable::new(),
+			video:             Loadable::new(),
+			thumbnail_texture: Loadable::new(),
+			image_details:     None,
+		})))
 	}
 
 	/// Returns this entry's path
 	pub fn path(&self) -> Arc<Path> {
-		Arc::clone(&*self.0.path.lock())
+		Arc::clone(&self.0.lock().path)
 	}
 
 	/// Returns this entry's file name
@@ -82,14 +80,14 @@ impl DirEntry {
 
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
-		*self.0.path.lock() = path.into();
+		self.0.lock().path = path.into();
 	}
 
 	/// Gets the metadata, blocking
 	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
 		self.0
-			.metadata
 			.lock()
+			.metadata
 			.load(|| self::load_metadata(&self.path()))
 			.context("Unable to get metadata")
 			.cloned_mut()
@@ -99,8 +97,8 @@ impl DirEntry {
 	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<Arc<fs::Metadata>>, AppError> {
 		#[cloned(this = self)]
 		self.0
-			.metadata
 			.lock()
+			.metadata
 			.try_load(thread_pool, Priority::DEFAULT, move || {
 				self::load_metadata(&this.path())
 			})
@@ -110,14 +108,14 @@ impl DirEntry {
 
 	/// Sets the metadata of this entry
 	pub(super) fn set_metadata(&self, metadata: fs::Metadata) {
-		self.0.metadata.lock().set(Arc::new(metadata));
+		self.0.lock().metadata.set(Arc::new(metadata));
 	}
 
 	/// Gets the image kind, blocking
 	fn image_kind_blocking(&self) -> Result<ImageKind, AppError> {
 		self.0
-			.image_kind
 			.lock()
+			.image_kind
 			.load(|| self::load_image_kind(&self.path()))
 			.context("Unable to get image kind")
 			.cloned()
@@ -127,8 +125,8 @@ impl DirEntry {
 	pub fn try_image_kind(&self, thread_pool: &PriorityThreadPool) -> Result<Option<ImageKind>, AppError> {
 		#[cloned(this = self)]
 		self.0
-			.image_kind
 			.lock()
+			.image_kind
 			.try_load(thread_pool, Priority::HIGH, move || self::load_image_kind(&this.path()))
 			.map(OptionClonedMut::cloned_mut)
 			.context("Unable to get image kind")
@@ -137,8 +135,8 @@ impl DirEntry {
 	/// Gets the modified date, blocking
 	fn modified_date_blocking(&self) -> Result<SystemTime, AppError> {
 		self.0
-			.modified_date
 			.lock()
+			.modified_date
 			.load(|| {
 				let metadata = self.metadata_blocking()?;
 				metadata.modified().context("Unable to get modified date")
@@ -149,17 +147,17 @@ impl DirEntry {
 
 	/// Returns the image details of this entry
 	pub fn image_details(&self) -> Option<ImageDetails> {
-		self.0.image_details.lock().clone()
+		self.0.lock().image_details.clone()
 	}
 
 	/// Returns if this entry contains image details
 	pub fn has_image_details(&self) -> bool {
-		self.0.image_details.lock().is_some()
+		self.0.lock().image_details.is_some()
 	}
 
 	/// Sets the image details of this entry
 	pub fn set_image_details(&self, image_details: ImageDetails) {
-		*self.0.image_details.lock() = Some(image_details);
+		self.0.lock().image_details = Some(image_details);
 	}
 
 	/// Gets the size, blocking
@@ -185,8 +183,8 @@ impl DirEntry {
 	) -> Result<Option<EntryImage>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0
-			.texture
 			.lock()
+			.texture
 			.try_load(thread_pool, Priority::HIGH, move || {
 				let ImageKind::Image { format } = this.image_kind_blocking().context("Unable to get image kind")?
 				else {
@@ -200,7 +198,7 @@ impl DirEntry {
 
 	/// Removes this image's texture
 	pub fn remove_texture(&self) {
-		self.0.texture.lock().remove();
+		self.0.lock().texture.remove();
 	}
 
 	/// Returns this image's video
@@ -211,8 +209,8 @@ impl DirEntry {
 	) -> Result<Option<EntryVideo>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0
-			.video
 			.lock()
+			.video
 			.try_load(thread_pool, Priority::HIGH, move || {
 				EntryVideo::new(&egui_ctx, &this.path())
 			})
@@ -223,8 +221,8 @@ impl DirEntry {
 	/// Returns this image's video, without loading it
 	pub fn video_if_exists(&self) -> Result<Option<EntryVideo>, AppError> {
 		self.0
-			.video
 			.lock()
+			.video
 			.try_get()
 			.map(OptionClonedMut::cloned_mut)
 			.cloned_err_mut()
@@ -232,7 +230,7 @@ impl DirEntry {
 
 	/// Removes this image's video
 	pub fn remove_video(&self) {
-		self.0.video.lock().remove();
+		self.0.lock().video.remove();
 	}
 
 	/// Returns this image's thumbnail texture
@@ -244,8 +242,8 @@ impl DirEntry {
 	) -> Result<Option<EntryImage>, AppError> {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0
-			.thumbnail_texture
 			.lock()
+			.thumbnail_texture
 			.try_load(thread_pool, Priority::LOW, move || {
 				let kind = this.image_kind_blocking().context("Unable to get image kind")?;
 				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), kind)
@@ -256,7 +254,7 @@ impl DirEntry {
 
 	/// Removes this image's thumbnail texture
 	pub fn _remove_thumbnail_texture(&self) {
-		self.0.texture.lock().remove();
+		self.0.lock().texture.remove();
 	}
 
 	/// Compares two directory entries according to a sort order
