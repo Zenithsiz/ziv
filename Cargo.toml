@@ -15,7 +15,7 @@ version     = "0.1.0"
 # Workspace
 ziv = { path = "ziv" }
 
-app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "c4d5777c07afa44136e5a785767b86a81d0e78f0" }
+app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "455b7e5d3b99748657f7e55912cea4178c88e758" }
 bitflags              = "2.10.0"
 clap                  = "4.5.47"
 derive_more           = "2.0.1"

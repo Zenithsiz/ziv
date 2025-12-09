@@ -35,10 +35,10 @@ impl<T, E> Loadable<T, E> {
 	/// Tries to get the value.
 	///
 	/// If unloaded and no value ready from the task, returns `Ok(None)`
-	pub fn try_get(&mut self) -> Result<Option<&T>, &E> {
+	pub fn try_get(&mut self) -> Result<Option<&mut T>, &mut E> {
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
-			return self.value.as_ref().expect("Just checked").as_ref().map(Some);
+			return self.value.as_mut().expect("Just checked").as_mut().map(Some);
 		}
 
 		let res = match self.task_rx.take() {
@@ -47,18 +47,18 @@ impl<T, E> Loadable<T, E> {
 		};
 
 		let res = self.value.insert(res);
-		res.as_ref().map(Some)
+		res.as_mut().map(Some)
 	}
 
 	/// Loads this value, blocking until loaded.
-	pub fn load<F>(&mut self, load: F) -> Result<&T, &E>
+	pub fn load<F>(&mut self, load: F) -> Result<&mut T, &mut E>
 	where
 		T: Send,
 		F: FnOnce() -> Result<T, E> + Send,
 	{
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
-			return self.value.as_ref().expect("Just checked").as_ref();
+			return self.value.as_mut().expect("Just checked").as_mut();
 		}
 
 		let res = match self.task_rx.take() {
@@ -67,7 +67,7 @@ impl<T, E> Loadable<T, E> {
 		};
 
 		let res = self.value.insert(res);
-		res.as_ref()
+		res.as_mut()
 	}
 
 	/// Tries to load the value
@@ -76,7 +76,7 @@ impl<T, E> Loadable<T, E> {
 		thread_pool: &PriorityThreadPool,
 		priority: Priority,
 		load: F,
-	) -> Result<Option<&T>, &E>
+	) -> Result<Option<&mut T>, &mut E>
 	where
 		T: Send + 'static,
 		E: Send + 'static,
@@ -84,14 +84,14 @@ impl<T, E> Loadable<T, E> {
 	{
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
-			return self.value.as_ref().expect("Just checked").as_ref().map(Some);
+			return self.value.as_mut().expect("Just checked").as_mut().map(Some);
 		}
 
 		match &self.task_rx {
 			Some(task_rx) => match task_rx.try_recv() {
 				Ok(res) => {
 					self.task_rx = None;
-					self.value.insert(res).as_ref().map(Some)
+					self.value.insert(res).as_mut().map(Some)
 				},
 				Err(oneshot::TryRecvError::Empty) => Ok(None),
 				Err(oneshot::TryRecvError::Disconnected) => panic!("Loading thread panicked"),

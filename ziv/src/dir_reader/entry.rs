@@ -1,5 +1,7 @@
 //! Directory entry
 
+// TODO: All context should be inside of `.try_load`
+
 // Modules
 pub mod image;
 pub mod video;
@@ -10,7 +12,15 @@ pub use self::{image::EntryImage, video::EntryVideo};
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	crate::util::{
+		AppError,
+		Loadable,
+		OptionClonedMut,
+		PriorityThreadPool,
+		ResultClonedMut,
+		ResultErrClonedMut,
+		priority_thread_pool::Priority,
+	},
 	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash, time::Duration},
@@ -82,7 +92,7 @@ impl DirEntry {
 			.lock()
 			.load(|| self::load_metadata(&self.path()))
 			.context("Unable to get metadata")
-			.map(Arc::clone)
+			.cloned_mut()
 	}
 
 	/// Tries to gets the metadata
@@ -94,7 +104,7 @@ impl DirEntry {
 			.try_load(thread_pool, Priority::DEFAULT, move || {
 				self::load_metadata(&this.path())
 			})
-			.map(|res| res.map(Arc::clone))
+			.map(OptionClonedMut::cloned_mut)
 			.context("Unable to get metadata")
 	}
 
@@ -110,7 +120,7 @@ impl DirEntry {
 			.lock()
 			.load(|| self::load_image_kind(&self.path()))
 			.context("Unable to get image kind")
-			.copied()
+			.cloned()
 	}
 
 	/// Returns this image's kind
@@ -120,7 +130,7 @@ impl DirEntry {
 			.image_kind
 			.lock()
 			.try_load(thread_pool, Priority::HIGH, move || self::load_image_kind(&this.path()))
-			.map(Option::<&_>::copied)
+			.map(OptionClonedMut::cloned_mut)
 			.context("Unable to get image kind")
 	}
 
@@ -134,7 +144,7 @@ impl DirEntry {
 				metadata.modified().context("Unable to get modified date")
 			})
 			.copied()
-			.map_err(AppError::clone)
+			.cloned_err_mut()
 	}
 
 	/// Returns the image details of this entry
@@ -184,8 +194,8 @@ impl DirEntry {
 				};
 				EntryImage::new(&egui_ctx, &this.path(), format)
 			})
-			.map(Option::<&_>::cloned)
-			.map_err(AppError::clone)
+			.map(OptionClonedMut::cloned_mut)
+			.cloned_err_mut()
 	}
 
 	/// Removes this image's texture
@@ -206,8 +216,8 @@ impl DirEntry {
 			.try_load(thread_pool, Priority::HIGH, move || {
 				EntryVideo::new(&egui_ctx, &this.path())
 			})
-			.map(Option::<&_>::cloned)
-			.map_err(AppError::clone)
+			.map(OptionClonedMut::cloned_mut)
+			.cloned_err_mut()
 	}
 
 	/// Returns this image's video, without loading it
@@ -216,8 +226,8 @@ impl DirEntry {
 			.video
 			.lock()
 			.try_get()
-			.map(Option::<&_>::cloned)
-			.map_err(AppError::clone)
+			.map(OptionClonedMut::cloned_mut)
+			.cloned_err_mut()
 	}
 
 	/// Removes this image's video
@@ -240,8 +250,8 @@ impl DirEntry {
 				let kind = this.image_kind_blocking().context("Unable to get image kind")?;
 				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), kind)
 			})
-			.map(Option::<&_>::cloned)
-			.map_err(AppError::clone)
+			.map(OptionClonedMut::cloned_mut)
+			.cloned_err_mut()
 	}
 
 	/// Removes this image's thumbnail texture

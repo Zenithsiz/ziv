@@ -246,3 +246,36 @@ pub fn format_duration(duration: Duration) -> impl fmt::Debug {
 		Ok(())
 	})
 }
+
+/// Clones the value in a `Result<&mut T, E>`
+#[extend::ext(name = ResultClonedMut)]
+pub impl<T, E> Result<&mut T, E> {
+	fn cloned_mut(self) -> Result<T, E>
+	where
+		T: Clone,
+	{
+		self.map(|value| value.clone())
+	}
+}
+
+/// Clones the value in an `Option<&mut T>`
+#[extend::ext(name = OptionClonedMut)]
+pub impl<T> Option<&mut T> {
+	fn cloned_mut(self) -> Option<T>
+	where
+		T: Clone,
+	{
+		self.map(|value| value.clone())
+	}
+}
+
+/// Clones the error in a `Result<T, &mut E>`
+#[extend::ext(name = ResultErrClonedMut)]
+pub impl<T, E> Result<T, &mut E> {
+	fn cloned_err_mut(self) -> Result<T, E>
+	where
+		E: Clone,
+	{
+		self.map_err(|err| err.clone())
+	}
+}

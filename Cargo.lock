@@ -254,7 +254,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "app-error"
 version = "0.1.0"
-source = "git+https://github.com/Zenithsiz/app-error?rev=c4d5777c07afa44136e5a785767b86a81d0e78f0#c4d5777c07afa44136e5a785767b86a81d0e78f0"
+source = "git+https://github.com/Zenithsiz/app-error?rev=455b7e5d3b99748657f7e55912cea4178c88e758#455b7e5d3b99748657f7e55912cea4178c88e758"
 dependencies = [
  "itertools 0.14.0",
 ]
