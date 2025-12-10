@@ -18,7 +18,11 @@ pub use self::{
 use {
 	crate::util::AppError,
 	app_error::Context,
-	core::{mem, ops::IntoBounds, time::Duration},
+	core::{
+		mem,
+		ops::{Bound, IntoBounds},
+		time::Duration,
+	},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
 		fs::{self},
@@ -129,6 +133,43 @@ impl DirReader {
 	{
 		let entries = self.inner.lock().entries.range(range.into_bounds())?.cloned().collect();
 		Some(entries)
+	}
+
+	/// Returns the next `len` entries after `entry`, wrapping around
+	pub fn after_entry(&self, entry: &DirEntry, len: usize) -> Result<Vec<DirEntry>, AppError> {
+		let mut inner = self.inner.lock();
+		let idx = inner.search(entry)?;
+
+		let entries = inner
+			.entries
+			.range((Bound::Excluded(idx), Bound::Unbounded))
+			.expect("Range should be valid")
+			.chain(inner.entries.iter())
+			.take(len)
+			.cloned()
+			.collect();
+		drop(inner);
+
+		Ok(entries)
+	}
+
+	/// Returns the next `len` entries before `entry`, wrapping around
+	pub fn before_entry(&self, entry: &DirEntry, len: usize) -> Result<Vec<DirEntry>, AppError> {
+		let mut inner = self.inner.lock();
+		let idx = inner.search(entry)?;
+
+		let entries = inner
+			.entries
+			.range((Bound::Unbounded, Bound::Excluded(idx)))
+			.expect("Range should be valid")
+			.rev()
+			.chain(inner.entries.iter().rev())
+			.take(len)
+			.cloned()
+			.collect();
+		drop(inner);
+
+		Ok(entries)
 	}
 
 	/// Gets the current entry.

@@ -225,6 +225,16 @@ impl<'a> Iterator for Range<'a> {
 	}
 }
 
+impl DoubleEndedIterator for Range<'_> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		match &mut self.iter {
+			RangeInner::FileName(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+			RangeInner::ModificationDate(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+			RangeInner::Size(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+		}
+	}
+}
+
 #[derive(derive_more::From, derive_more::Debug)]
 enum IterInner<'a> {
 	FileName(#[debug(ignore)] indexset::Iter<'a, DirEntryFileName>),
@@ -246,6 +256,16 @@ impl<'a> Iterator for Iter<'a> {
 			IterInner::FileName(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
 			IterInner::ModificationDate(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
 			IterInner::Size(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+		}
+	}
+}
+
+impl DoubleEndedIterator for Iter<'_> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		match &mut self.iter {
+			IterInner::FileName(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+			IterInner::ModificationDate(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+			IterInner::Size(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
 		}
 	}
 }
@@ -273,6 +293,13 @@ fn iter_next<I: DoubleEndedIterator>(iter: &mut I, reverse: bool) -> Option<I::I
 	match reverse {
 		true => iter.next_back(),
 		false => iter.next(),
+	}
+}
+
+fn iter_next_back<I: DoubleEndedIterator>(iter: &mut I, reverse: bool) -> Option<I::Item> {
+	match reverse {
+		true => iter.next(),
+		false => iter.next_back(),
 	}
 }
 
