@@ -317,6 +317,9 @@ impl EguiApp {
 				.loaded_entries
 				.shift_remove_index(to_remove_loaded_idx)
 				.expect("Just checked it wasn't empty");
+
+			// TODO: Instead of removing data, we should just unload
+			//       the image/video.
 			entry.remove_data();
 		}
 	}
@@ -822,6 +825,9 @@ impl EguiApp {
 					.load(&self.thread_pool, egui_ctx)
 					.context("Unable to load image")?,
 				EntryData::Video(video) => {
+					// TODO: Pausing the video here means we aren't actually
+					//       preloading almost anything, just the thread initializing,
+					//       we should make it so a single frame gets rendered here.
 					video.pause();
 					video.start();
 				},
@@ -870,6 +876,51 @@ impl EguiApp {
 			},
 		};
 
+		// Pre-load some entries
+		// Note: If there are no entries, there's no point in pre-loading.
+		//       This can happen when we start sorting and nothing has been
+		//       added back in yet.
+		// Note: Despite the indexes being correct, we double-check all these
+		//       `entry_range` calls because the map can mutate in the background,
+		//       given we're not holding any locks, thus making the indexes invalid.
+		let entries_len = self.dir_reader.len();
+		if let Some(idx) = input.entry.idx &&
+			entries_len != 0
+		{
+			// Preload all entries on the side
+			let preload_start = idx.saturating_sub(self.preload_prev);
+			let preload_end = (idx + self.preload_next).min(entries_len - 1);
+			if let Some(entries) = self.dir_reader.entry_range(preload_start..=preload_end) {
+				for entry in entries {
+					if entry == *input.entry {
+						continue;
+					}
+
+					self.preload_entry(ui.ctx(), &entry);
+				}
+			}
+
+			// Then handle wraparounds
+			if idx < self.preload_prev &&
+				let Some(entries) = self
+					.dir_reader
+					.entry_range((entries_len - idx).saturating_sub(self.preload_prev)..)
+			{
+				for entry in entries {
+					self.preload_entry(ui.ctx(), &entry);
+				}
+			}
+			if idx + self.preload_next >= entries_len &&
+				let Some(entries) = self
+					.dir_reader
+					.entry_range(..=(self.preload_next - (entries_len - idx)).min(entries_len))
+			{
+				for entry in entries {
+					self.preload_entry(ui.ctx(), &entry);
+				}
+			}
+		}
+
 		match data {
 			EntryData::Video(video) => {
 				let image_size = video.size();
@@ -877,6 +928,7 @@ impl EguiApp {
 					if !video.started() {
 						video.start();
 					}
+					video.resume();
 
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
@@ -917,51 +969,6 @@ impl EguiApp {
 			},
 
 			EntryData::Image(image) => {
-				// TODO: Do this above
-				// Note: If there are no entries, there's no point in pre-loading.
-				//       This can happen when we start sorting and nothing has been
-				//       added back in yet.
-				// Note: Despite the indexes being correct, we double-check all these
-				//       `entry_range` calls because the map can mutate in the background,
-				//       given we're not holding any locks, thus making the indexes invalid.
-				let entries_len = self.dir_reader.len();
-				if let Some(idx) = input.entry.idx &&
-					entries_len != 0
-				{
-					// Preload all entries on the side
-					let preload_start = idx.saturating_sub(self.preload_prev);
-					let preload_end = (idx + self.preload_next).min(entries_len - 1);
-					if let Some(entries) = self.dir_reader.entry_range(preload_start..=preload_end) {
-						for entry in entries {
-							if entry == *input.entry {
-								continue;
-							}
-
-							self.preload_entry(ui.ctx(), &entry);
-						}
-					}
-
-					// Then handle wraparounds
-					if idx < self.preload_prev &&
-						let Some(entries) = self
-							.dir_reader
-							.entry_range((entries_len - idx).saturating_sub(self.preload_prev)..)
-					{
-						for entry in entries {
-							self.preload_entry(ui.ctx(), &entry);
-						}
-					}
-					if idx + self.preload_next >= entries_len &&
-						let Some(entries) = self
-							.dir_reader
-							.entry_range(..=(self.preload_next - (entries_len - idx)).min(entries_len))
-					{
-						for entry in entries {
-							self.preload_entry(ui.ctx(), &entry);
-						}
-					}
-				}
-
 				let handle = match image.handle() {
 					Ok(Some(handle)) => handle,
 					Ok(None) => {
