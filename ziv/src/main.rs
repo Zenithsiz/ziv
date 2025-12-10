@@ -186,7 +186,8 @@ struct EguiApp {
 	preload_next: usize,
 
 	/// Entries we're loaded
-	loaded_entries:     IndexSet<DirEntry>,
+	// TODO: We need a better solution than this
+	loaded_entries: IndexSet<DirEntry>,
 	max_loaded_entries: usize,
 }
 
@@ -807,15 +808,32 @@ impl EguiApp {
 		}
 	}
 
-	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: DirEntry) {
-		if let Err(err) = entry.try_data(&self.thread_pool, egui_ctx) {
+	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
+		let res: Result<_, AppError> = try {
+			let Some(data) = entry
+				.try_data(&self.thread_pool, egui_ctx)
+				.context("Unable to load entry data")?
+			else {
+				return;
+			};
+
+			match data {
+				EntryData::Image(image) => image
+					.load(&self.thread_pool, egui_ctx)
+					.context("Unable to load image")?,
+				EntryData::Video(video) => {
+					video.pause();
+					video.start();
+				},
+			}
+
+			self.loaded_entries.insert(entry.clone());
+		};
+
+		if let Err(err) = res {
 			tracing::warn!("Unable to load image {:?}, removing: {err:?}", entry.path());
-			self.dir_reader.remove(&entry);
+			self.dir_reader.remove(entry);
 		}
-
-		// TODO: We need to actually load the image / start the video after.
-
-		self.loaded_entries.insert(entry);
 	}
 
 	/// Draws an entry
@@ -919,7 +937,7 @@ impl EguiApp {
 								continue;
 							}
 
-							self.preload_entry(ui.ctx(), entry);
+							self.preload_entry(ui.ctx(), &entry);
 						}
 					}
 
@@ -930,7 +948,7 @@ impl EguiApp {
 							.entry_range((entries_len - idx).saturating_sub(self.preload_prev)..)
 					{
 						for entry in entries {
-							self.preload_entry(ui.ctx(), entry);
+							self.preload_entry(ui.ctx(), &entry);
 						}
 					}
 					if idx + self.preload_next >= entries_len &&
@@ -939,7 +957,7 @@ impl EguiApp {
 							.entry_range(..=(self.preload_next - (entries_len - idx)).min(entries_len))
 					{
 						for entry in entries {
-							self.preload_entry(ui.ctx(), entry);
+							self.preload_entry(ui.ctx(), &entry);
 						}
 					}
 				}
