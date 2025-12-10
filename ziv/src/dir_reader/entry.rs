@@ -41,7 +41,6 @@ struct Inner {
 
 	metadata:          Loadable<Arc<Metadata>>,
 	data:              Loadable<EntryData>,
-	modified_date:     Loadable<SystemTime>,
 	thumbnail_texture: Loadable<EntryImage>,
 }
 
@@ -55,7 +54,6 @@ impl DirEntry {
 			path:              path.into(),
 			metadata:          Loadable::new(),
 			data:              Loadable::new(),
-			modified_date:     Loadable::new(),
 			thumbnail_texture: Loadable::new(),
 		})))
 	}
@@ -164,15 +162,8 @@ impl DirEntry {
 impl DirEntry {
 	/// Gets the modified date, blocking
 	fn modified_date_blocking(&self) -> Result<SystemTime, AppError> {
-		self.0
-			.lock()
-			.modified_date
-			.load(|| {
-				let metadata = self.metadata_blocking()?;
-				metadata.modified().context("Unable to get modified date")
-			})
-			.copied()
-			.cloned_err_mut()
+		let metadata = self.metadata_blocking()?;
+		metadata.modified().context("Unable to get modified date")
 	}
 }
 
