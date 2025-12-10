@@ -47,7 +47,7 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{EntryData, video::PlayingStatus},
+			entry::{EntryData, EntryThumbnail, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -1292,8 +1292,12 @@ impl EguiApp {
 										let image_size = egui::vec2(image_width, image_height);
 
 										ui.vertical_centered_justified(|ui| {
-											let handle = self.try_with_entry(&entry, |this, entry| {
-												let Some(image) = entry.thumbnail_texture(
+											enum Thumbnail {
+												Image(egui::TextureHandle),
+												NonMedia,
+											}
+											let thumbnail = self.try_with_entry(&entry, |this, entry| try {
+												let Some(thumbnail) = entry.thumbnail(
 													&this.thread_pool,
 													ui.ctx(),
 													this.thumbnails_dir.path(),
@@ -1302,11 +1306,15 @@ impl EguiApp {
 													return Ok(None);
 												};
 
-												image.handle()
+												match thumbnail {
+													EntryThumbnail::Image(image) =>
+														image.handle()?.map(Thumbnail::Image),
+													EntryThumbnail::NonMedia => Some(Thumbnail::NonMedia),
+												}
 											});
 
-											let response = match handle {
-												Some(handle) => {
+											let response = match thumbnail {
+												Some(Thumbnail::Image(handle)) => {
 													let texture = egui::load::SizedTexture::from_handle(&handle);
 													let image = egui::Image::from_texture(texture)
 														.fit_to_exact_size(image_size)
@@ -1314,6 +1322,10 @@ impl EguiApp {
 														.sense(egui::Sense::click());
 
 													ui.add(image)
+												},
+												Some(Thumbnail::NonMedia) => {
+													self.remove_entry(&entry);
+													return;
 												},
 												None => ui.allocate_response(image_size, egui::Sense::click()),
 											};

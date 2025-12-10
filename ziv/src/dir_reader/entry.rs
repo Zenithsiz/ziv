@@ -4,10 +4,11 @@
 
 // Modules
 pub mod image;
+pub mod thumbnail;
 pub mod video;
 
 // Exports
-pub use self::{image::EntryImage, video::EntryVideo};
+pub use self::{image::EntryImage, thumbnail::EntryThumbnail, video::EntryVideo};
 
 // Imports
 use {
@@ -31,9 +32,9 @@ use {
 struct Inner {
 	path: Mutex<Arc<Path>>,
 
-	metadata:          Loadable<Arc<Metadata>>,
-	data:              Loadable<EntryData>,
-	thumbnail_texture: Loadable<EntryImage>,
+	metadata:  Loadable<Arc<Metadata>>,
+	data:      Loadable<EntryData>,
+	thumbnail: Loadable<EntryThumbnail>,
 }
 
 #[derive(Clone, derive_more::Debug)]
@@ -43,10 +44,10 @@ impl DirEntry {
 	/// Creates a new directory entry
 	pub(super) fn new(path: impl Into<Arc<Path>>) -> Self {
 		Self(Arc::new(Inner {
-			path:              Mutex::new(path.into()),
-			metadata:          Loadable::new(),
-			data:              Loadable::new(),
-			thumbnail_texture: Loadable::new(),
+			path:      Mutex::new(path.into()),
+			metadata:  Loadable::new(),
+			data:      Loadable::new(),
+			thumbnail: Loadable::new(),
 		}))
 	}
 }
@@ -166,18 +167,18 @@ impl DirEntry {
 
 /// Thumbnail
 impl DirEntry {
-	/// Returns this image's thumbnail texture
-	pub fn thumbnail_texture(
+	/// Returns this image's thumbnail
+	pub fn thumbnail(
 		&self,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Arc<Path>,
-	) -> Result<Option<EntryImage>, AppError> {
+	) -> Result<Option<EntryThumbnail>, AppError> {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
-		self.0.thumbnail_texture.try_load(thread_pool, Priority::LOW, move || {
+		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
 			let path = this.path();
 			let data = this.data_blocking(&egui_ctx).context("Unable to get image kind")?;
-			EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &path, &data)
+			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &path, &data)
 		})
 	}
 }
