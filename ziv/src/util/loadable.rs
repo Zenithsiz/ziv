@@ -39,6 +39,13 @@ impl<T, E> Loadable<T, E> {
 		}
 	}
 
+	/// Returns if this loadable has a value.
+	///
+	/// Does not check if the loading task exists or is done.
+	pub fn is_loaded(&self) -> bool {
+		self.inner.lock().value.is_some()
+	}
+
 	/// Sets the value, and removing the task loading it, if any
 	pub fn set(&self, value: T) {
 		let mut inner = self.inner.lock();

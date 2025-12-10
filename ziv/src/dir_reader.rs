@@ -478,8 +478,9 @@ impl Inner {
 				},
 			};
 
-			// If it has an index, we can return it without any more processing
-			if cur_entry.idx.is_some() {
+			// If it has an index, or isn't loaded for the current sort order,
+			// there's nothing we can do without blocking, so quit
+			if cur_entry.idx.is_some() || !cur_entry.entry.is_loaded_for_order(self.sort_order) {
 				break cur_entry;
 			}
 
@@ -487,8 +488,6 @@ impl Inner {
 			// Note: On errors, we remove the current entry and try again.
 			//       We only need to remove it from the field because all entries
 			//       in the list are guaranteed to be loaded for the correct sort order.
-			// TODO: This *can* block when sorting, so we should just return if the field
-			//       for the current sort order isn't loaded.
 			let idx = match self.search(&cur_entry.entry) {
 				Ok(idx) => idx,
 				Err(err) => {
@@ -499,13 +498,14 @@ impl Inner {
 			};
 
 			// Since we might have unlocked the mutex when loading the field,
-			// we first need to make sure the current entry hasn't changed. If it has,
-			// we need to try again
-			if let Some(cur_entry_after) = &mut self.cur_entry &&
-				cur_entry_after.entry == cur_entry.entry
+			// we first need to make sure the current entry hasn't changed.
+			// If it hasn't, we can just assign the index and return, otherwise
+			// we repeat the loop.
+			if let Some(new_cur_entry) = &mut self.cur_entry &&
+				new_cur_entry.entry == cur_entry.entry
 			{
-				cur_entry_after.idx = Some(idx);
-				break cur_entry_after.clone();
+				new_cur_entry.idx = Some(idx);
+				break new_cur_entry.clone();
 			}
 		};
 

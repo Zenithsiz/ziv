@@ -221,6 +221,14 @@ impl DirEntry {
 		Ok(order)
 	}
 
+	/// Returns if this entry is loaded for `order`
+	pub(super) fn is_loaded_for_order(&self, order: SortOrder) -> bool {
+		match order.kind {
+			SortOrderKind::FileName => true,
+			SortOrderKind::ModificationDate | SortOrderKind::Size => self.0.metadata.is_loaded(),
+		}
+	}
+
 	/// Loads the necessary fields for `order`
 	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
 		match order.kind {
