@@ -1351,7 +1351,10 @@ impl EguiApp {
 											}
 
 											if let Ok(file_name) = entry.file_name() {
-												let response = ui.label(file_name.display().to_string());
+												let label = egui::Label::new(file_name.display().to_string())
+													.wrap_mode(egui::TextWrapMode::Truncate);
+
+												let response = ui.add(label);
 												ui.data_mut(|data| {
 													data.insert_temp(file_name_height_id, response.rect.height());
 												});
