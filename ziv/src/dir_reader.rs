@@ -52,7 +52,7 @@ use {
 /// # Cursor
 /// The list also keeps a cursor exposing both an index (based on the sort
 /// order) and the entry itself.
-#[derive(derive_more::Debug)]
+#[derive(Debug)]
 pub struct DirReader {
 	inner: Arc<Mutex<Inner>>,
 

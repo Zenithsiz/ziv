@@ -37,7 +37,7 @@ struct State {
 	seek_to:        Option<Duration>,
 }
 
-#[derive(derive_more::Debug)]
+#[derive(Debug)]
 struct Inner {
 	// TODO: Should this be optional?
 	texture_handle: EguiTextureHandle,

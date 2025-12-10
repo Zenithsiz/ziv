@@ -9,7 +9,7 @@ use {
 	zutil_cloned::cloned,
 };
 
-#[derive(derive_more::Debug)]
+#[derive(Debug)]
 struct Inner {
 	path:   Arc<Path>,
 	handle: Loadable<EguiTextureHandle>,

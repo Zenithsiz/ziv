@@ -37,7 +37,7 @@ struct Inner {
 	thumbnail: Loadable<EntryThumbnail>,
 }
 
-#[derive(Clone, derive_more::Debug)]
+#[derive(Clone, Debug)]
 pub struct DirEntry(Arc<Inner>);
 
 impl DirEntry {
