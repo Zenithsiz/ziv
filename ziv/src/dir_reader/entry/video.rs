@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::util::{AppError, InstantSaturatingOps, TryControlFlow},
+	crate::util::{AppError, EguiTextureHandle, InstantSaturatingOps, TryControlFlow},
 	app_error::Context,
 	core::{mem, time::Duration},
 	ffmpeg_next::Rescale,
@@ -40,8 +40,7 @@ struct State {
 #[derive(derive_more::Debug)]
 struct Inner {
 	// TODO: Should this be optional?
-	#[debug("{:?}", self.texture_handle.id())]
-	texture_handle: egui::TextureHandle,
+	texture_handle: EguiTextureHandle,
 	state:          Mutex<State>,
 	condvar:        Condvar,
 }
@@ -65,8 +64,8 @@ impl EntryVideo {
 		);
 
 		let inner = Arc::new(Inner {
-			texture_handle,
-			state: Mutex::new(State {
+			texture_handle: EguiTextureHandle(texture_handle),
+			state:          Mutex::new(State {
 				path,
 				thread_status: DecoderThreadStatus::Stopped,
 				onscreen: false,
@@ -76,7 +75,7 @@ impl EntryVideo {
 				cur_time: Duration::ZERO,
 				seek_to: None,
 			}),
-			condvar: Condvar::new(),
+			condvar:        Condvar::new(),
 		});
 
 		Ok(Self { inner })
@@ -125,9 +124,9 @@ impl EntryVideo {
 		self.inner.texture_handle.size_vec2()
 	}
 
-	/// Returns the texture
-	pub fn texture(&self) -> egui::load::SizedTexture {
-		egui::load::SizedTexture::from_handle(&self.inner.texture_handle)
+	/// Returns the handle
+	pub fn handle(&self) -> EguiTextureHandle {
+		self.inner.texture_handle.clone()
 	}
 
 	/// Sets this video as on-screen.

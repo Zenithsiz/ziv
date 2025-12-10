@@ -279,3 +279,15 @@ pub impl<T, E> Result<T, &mut E> {
 		self.map_err(|err| err.clone())
 	}
 }
+
+/// Wrapper around `egui::TextureHandle`
+#[derive(PartialEq, Eq, Clone, Hash, derive_more::Debug)]
+#[derive(derive_more::Deref, derive_more::DerefMut)]
+#[debug("{:?}", self.0.id())]
+pub struct EguiTextureHandle(pub egui::TextureHandle);
+
+impl From<&'_ EguiTextureHandle> for egui::load::SizedTexture {
+	fn from(handle: &EguiTextureHandle) -> Self {
+		Self::from_handle(&handle.0)
+	}
+}

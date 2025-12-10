@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	crate::util::{AppError, EguiTextureHandle, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	app_error::Context,
 	image::{DynamicImage, ImageFormat, ImageReader},
 	std::{path::Path, sync::Arc},
@@ -12,9 +12,7 @@ use {
 #[derive(derive_more::Debug)]
 struct Inner {
 	path:   Arc<Path>,
-	// TODO: Create a wrapper over `egui::TextureHandle` that implements Debug.
-	#[debug("{:?}", self.handle.try_get().map(|res| res.as_ref().map(egui::TextureHandle::id)))]
-	handle: Loadable<egui::TextureHandle>,
+	handle: Loadable<EguiTextureHandle>,
 	format: ImageFormat,
 }
 
@@ -51,7 +49,7 @@ impl EntryImage {
 		Self {
 			inner: Arc::new(Inner {
 				path,
-				handle: Loadable::loaded(handle),
+				handle: Loadable::loaded(EguiTextureHandle(handle)),
 				format,
 			}),
 		}
@@ -94,7 +92,7 @@ impl EntryImage {
 			let options = egui::TextureOptions::LINEAR;
 			let handle = egui_ctx.load_texture(path.display().to_string(), image, options);
 
-			Ok(handle)
+			Ok(EguiTextureHandle(handle))
 		})?;
 
 		Ok(())
@@ -111,7 +109,7 @@ impl EntryImage {
 	}
 
 	/// Returns the image handle, if loaded
-	pub fn handle(&self) -> Result<Option<egui::TextureHandle>, AppError> {
+	pub fn handle(&self) -> Result<Option<EguiTextureHandle>, AppError> {
 		self.inner.handle.try_get()
 	}
 }

@@ -51,7 +51,7 @@ use {
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
-		util::{AppError, PriorityThreadPool, RectUtils},
+		util::{AppError, EguiTextureHandle, PriorityThreadPool, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -967,7 +967,7 @@ impl EguiApp {
 					}
 				}
 
-				let image = egui::Image::from_texture(video.texture()).sense(egui::Sense::click());
+				let image = egui::Image::from_texture(&video.handle()).sense(egui::Sense::click());
 
 				output.image_response = Some(Self::draw_image(
 					ui,
@@ -994,8 +994,7 @@ impl EguiApp {
 				};
 
 				let image_size = handle.size_vec2();
-				let image = egui::Image::from_texture(egui::load::SizedTexture::from_handle(&handle))
-					.sense(egui::Sense::click());
+				let image = egui::Image::from_texture(&handle).sense(egui::Sense::click());
 
 				// Note: If we're in fullscreen, we shouldn't resize yet.
 				//       If we did, the user might notice a flicker, because
@@ -1306,7 +1305,7 @@ impl EguiApp {
 
 										ui.vertical_centered_justified(|ui| {
 											enum Thumbnail {
-												Image(egui::TextureHandle),
+												Image(EguiTextureHandle),
 												NonMedia,
 											}
 											let thumbnail = self.try_with_entry(&entry, |this, entry| try {
@@ -1328,8 +1327,7 @@ impl EguiApp {
 
 											let response = match thumbnail {
 												Some(Thumbnail::Image(handle)) => {
-													let texture = egui::load::SizedTexture::from_handle(&handle);
-													let image = egui::Image::from_texture(texture)
+													let image = egui::Image::from_texture(&handle)
 														.fit_to_exact_size(image_size)
 														.show_loading_spinner(false)
 														.sense(egui::Sense::click());
