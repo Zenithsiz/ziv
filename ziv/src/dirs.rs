@@ -22,7 +22,6 @@ pub struct Dirs {
 	thumbnails: OnceLock<Arc<Path>>,
 
 	/// Config file
-	// TODO: Use the xdg spec thumbnail directory instead of our own?
 	config: OnceLock<Arc<Path>>,
 }
 

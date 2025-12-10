@@ -10,7 +10,6 @@ use {
 };
 
 /// Shortcut keys
-// TODO: Allow modifiers here.
 #[derive(Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Shortcuts {

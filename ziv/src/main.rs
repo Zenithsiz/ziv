@@ -539,8 +539,6 @@ impl EguiApp {
 
 							ui.horizontal(|ui| {
 								ui.label(shortcut_ident.to_string());
-								// TODO: Include modifiers here
-
 								match self.settings_waiting_for_key == Some(shortcut_ident) {
 									true =>
 										if ui.button("Waiting for key...").clicked() {
@@ -728,7 +726,6 @@ impl EguiApp {
 		if scroll_delta != 1.0 &&
 			let Some(cursor_pos) = window_response.union(image_response.clone()).hover_pos()
 		{
-			// TODO: Make this sensitivity configurable
 			pan_zoom.zoom += (scroll_delta - 1.0) * controls.zoom_sensitivity;
 
 			// Cap our zoom to not view outside the window

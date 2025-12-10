@@ -173,7 +173,7 @@ pub fn video_thumbnail(path: &Path) -> Result<DynamicImage, AppError> {
 		return Ok(image.into());
 	}
 
-	// TODO: If the video is less than 1 second this can happen, should
+	// TODO: If the video is less than 2 seconds long this can happen, should
 	//       we just retry with less time?
 	app_error::bail!("Video had no packets");
 }

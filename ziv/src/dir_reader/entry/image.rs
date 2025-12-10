@@ -19,7 +19,6 @@ struct Inner {
 }
 
 /// Entry image
-// TODO: Make this lazy-loaded
 #[derive(Clone, Debug)]
 pub struct EntryImage {
 	inner: Arc<Inner>,
