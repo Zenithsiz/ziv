@@ -333,8 +333,9 @@ impl EguiApp {
 
 		if let Ok(Some(data)) = cur_entry.data_if_exists() {
 			match data {
-				EntryData::Image { image, format } => {
+				EntryData::Image { image } => {
 					let size = image.size();
+					let format = image.format();
 					write_str!(title, " {}x{} ({format:?})", size.x, size.y);
 				},
 				EntryData::Video { video } => {

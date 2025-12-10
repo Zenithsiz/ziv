@@ -274,7 +274,7 @@ impl Hash for DirEntry {
 /// Entry data
 #[derive(Clone, Debug)]
 pub enum EntryData {
-	Image { format: ImageFormat, image: EntryImage },
+	Image { image: EntryImage },
 	Video { video: EntryVideo },
 }
 
@@ -300,7 +300,6 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
 		return Ok(EntryData::Image {
-			format,
 			image: EntryImage::new(egui_ctx, path, format).context("Unable to create image")?,
 		});
 	}
@@ -312,7 +311,6 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 		.context("Unable to read file")?;
 	if let Some(format) = reader.format() {
 		return Ok(EntryData::Image {
-			format,
 			image: EntryImage::new(egui_ctx, path, format).context("Unable to create image")?,
 		});
 	}

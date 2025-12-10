@@ -11,8 +11,10 @@ use {
 };
 
 /// Entry image
-#[derive(Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub struct EntryImage {
+	format: ImageFormat,
+	#[debug("{:?}", self.handle.id())]
 	handle: egui::TextureHandle,
 }
 
@@ -53,7 +55,7 @@ impl EntryImage {
 		// TODO: Could we make it so we don't require an egui context here?
 		let handle = egui_ctx.load_texture(path.display().to_string(), image, options);
 
-		Ok(Self { handle })
+		Ok(Self { format, handle })
 	}
 
 	/// Creates a new thumbnail entry image from an image
@@ -77,8 +79,8 @@ impl EntryImage {
 		let image = match image::open(&cache_path) {
 			Ok(image) => image,
 			Err(err) => {
-				let format = match *data {
-					EntryData::Image { format, .. } => Some(format),
+				let format = match data {
+					EntryData::Image { image } => Some(image.format),
 					// Note: `image` supports gifs, so we can still generate thumbnails for them
 					EntryData::Video { .. } if path.extension().and_then(OsStr::to_str) == Some("gif") =>
 						Some(ImageFormat::Gif),
@@ -124,7 +126,15 @@ impl EntryImage {
 		// TODO: Could we make it so we don't require an egui context here?
 		let handle = egui_ctx.load_texture(path.display().to_string(), image, options);
 
-		Ok(Self { handle })
+		Ok(Self {
+			format: ImageFormat::Png,
+			handle,
+		})
+	}
+
+	/// Returns this image's format
+	pub const fn format(&self) -> ImageFormat {
+		self.format
 	}
 
 	/// Returns the size of this image
@@ -138,12 +148,6 @@ fn open_with_format(path: &Path, format: ImageFormat) -> Result<image::DynamicIm
 	let mut image_reader = ImageReader::open(path).context("Unable to open image")?;
 	image_reader.set_format(format);
 	image_reader.decode().context("Unable to read image")
-}
-
-impl core::fmt::Debug for EntryImage {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("EntryImage").field("handle", &self.handle.id()).finish()
-	}
 }
 
 impl From<EntryImage> for egui::load::SizedTexture {
