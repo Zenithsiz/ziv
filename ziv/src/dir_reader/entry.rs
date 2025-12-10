@@ -86,10 +86,10 @@ impl DirEntry {
 impl DirEntry {
 	/// Gets the metadata, blocking
 	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
-		self.0
-			.lock()
+		let inner = &mut *self.0.lock();
+		inner
 			.metadata
-			.load(|| self::load_metadata(&self.path()))
+			.load(|| self::load_metadata(&inner.path))
 			.context("Unable to get metadata")
 			.cloned_mut()
 	}
@@ -117,10 +117,10 @@ impl DirEntry {
 impl DirEntry {
 	/// Gets the entry's data, blocking
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
-		self.0
-			.lock()
+		let inner = &mut *self.0.lock();
+		inner
 			.data
-			.load(|| self::load_entry_data(&self.path(), egui_ctx))
+			.load(|| self::load_entry_data(&inner.path, egui_ctx))
 			.context("Unable to get entry data")
 			.cloned()
 	}
@@ -199,8 +199,9 @@ impl DirEntry {
 			.lock()
 			.thumbnail_texture
 			.try_load(thread_pool, Priority::LOW, move || {
+				let path = this.path();
 				let data = this.data_blocking(&egui_ctx).context("Unable to get image kind")?;
-				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), &data)
+				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &path, &data)
 			})
 			.map(OptionClonedMut::cloned_mut)
 			.cloned_err_mut()

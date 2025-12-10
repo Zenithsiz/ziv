@@ -60,7 +60,7 @@ impl<T, E> Loadable<T, E> {
 	pub fn load<F>(&mut self, load: F) -> Result<&mut T, &mut E>
 	where
 		T: Send,
-		F: FnOnce() -> Result<T, E> + Send,
+		F: FnOnce() -> Result<T, E>,
 	{
 		// TODO: Use pattern matching once polonius comes around
 		if self.value.is_some() {
