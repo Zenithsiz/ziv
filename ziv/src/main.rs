@@ -913,7 +913,7 @@ impl EguiApp {
 			if idx + self.preload_next >= entries_len &&
 				let Some(entries) = self
 					.dir_reader
-					.entry_range(..=(self.preload_next - (entries_len - idx)).min(entries_len))
+					.entry_range(..=(idx + self.preload_next - entries_len).min(entries_len))
 			{
 				for entry in entries {
 					self.preload_entry(ui.ctx(), &entry);
