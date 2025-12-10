@@ -25,6 +25,7 @@ use {
 	},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
+		iter,
 		path::{Path, PathBuf},
 		sync::{Arc, mpsc},
 		thread,
@@ -139,11 +140,12 @@ impl DirReader {
 		let mut inner = self.inner.lock();
 		let idx = inner.search(entry)?;
 
-		let entries = inner
+		let entries_after = inner
 			.entries
 			.range((Bound::Excluded(idx), Bound::Unbounded))
-			.expect("Range should be valid")
-			.chain(inner.entries.iter())
+			.into_iter()
+			.flatten();
+		let entries = iter::chain(entries_after, inner.entries.iter())
 			.take(len)
 			.cloned()
 			.collect();
@@ -157,12 +159,13 @@ impl DirReader {
 		let mut inner = self.inner.lock();
 		let idx = inner.search(entry)?;
 
-		let entries = inner
+		let entries_before = inner
 			.entries
 			.range((Bound::Unbounded, Bound::Excluded(idx)))
-			.expect("Range should be valid")
-			.rev()
-			.chain(inner.entries.iter().rev())
+			.into_iter()
+			.flatten()
+			.rev();
+		let entries = iter::chain(entries_before, inner.entries.iter().rev())
 			.take(len)
 			.cloned()
 			.collect();
@@ -584,6 +587,8 @@ impl Inner {
 	}
 
 	/// Binary searches the index of `entry`.
+	// TODO: This really needs to return a `Result<usize, usize>` to avoid
+	//       bugs elsewhere that assume the item exists
 	pub fn search(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<usize, AppError> {
 		self.load(entry)?;
 		let idx = self.entries.search(entry);

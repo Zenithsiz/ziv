@@ -138,57 +138,34 @@ impl Entries {
 
 	pub fn range<R: IntoBounds<usize>>(&self, range: R) -> Option<Range<'_>> {
 		let (start, end) = range.into_bounds();
-
 		let len = self.len();
-		let (start, end) = match self.reverse {
-			true => {
-				let new_start = match end {
-					Bound::Included(idx) => Bound::Excluded(len.checked_sub(idx)?),
-					Bound::Excluded(idx) => Bound::Excluded(len.checked_sub(idx)?.checked_sub(1)?),
-					Bound::Unbounded => Bound::Unbounded,
-				};
-				let new_end = match start {
-					Bound::Included(idx) => Bound::Excluded(len.checked_sub(idx)?),
-					Bound::Excluded(idx) => Bound::Excluded(len.checked_sub(idx)?.checked_sub(1)?),
-					Bound::Unbounded => Bound::Unbounded,
-				};
 
-				(new_start, new_end)
-			},
-			false => {
-				let start_within_bounds = match start {
-					Bound::Included(idx) => idx < len,
-					Bound::Excluded(idx) => idx <= len,
-					Bound::Unbounded => true,
-				};
-				let end_within_bounds = match end {
-					Bound::Included(idx) => idx < len,
-					Bound::Excluded(idx) => idx <= len,
-					Bound::Unbounded => true,
-				};
-				if !start_within_bounds || !end_within_bounds {
-					return None;
-				}
-
-				(start, end)
-			},
+		let bounds = {
+			let start = match start {
+				Bound::Included(start) => start,
+				Bound::Excluded(start) => start.checked_add(1)?,
+				Bound::Unbounded => 0,
+			};
+			let end = match end {
+				Bound::Included(end) => end.checked_add(1)?,
+				Bound::Excluded(end) => end,
+				Bound::Unbounded => len,
+			};
+			start..end
 		};
 
-		// Note: An excluded bound of 0 triggers a crash, so we compensate
-		//       by including it and then removing the element
-		let (end, pop_last) = match end {
-			Bound::Excluded(0) => (Bound::Included(0), true),
-			_ => (end, false),
+		let bounds = match self.reverse {
+			true => len.checked_sub(bounds.end)?..len.checked_sub(bounds.start)?,
+			false => bounds,
 		};
 
-		match_inner! { entries @ &self.inner => {
-			let mut iter = entries.range_idx((start, end));
-			if pop_last {
-				iter.next_back();
-			}
+		// Note: `indexset` panics on `..0`, so we use the equivalent `..1`.
+		let bounds = match bounds.end {
+			0 => bounds.start..1,
+			_ => bounds,
+		};
 
-			Some(Range { iter: iter.into(), reverse: self.reverse })
-		}}
+		match_inner! { entries @ &self.inner => Some(Range { iter: entries.range_idx(bounds).into(), reverse: self.reverse }) }
 	}
 
 	pub fn iter(&self) -> Iter<'_> {
