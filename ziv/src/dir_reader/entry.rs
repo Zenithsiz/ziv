@@ -107,7 +107,7 @@ impl DirEntry {
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
 		self.0
 			.data
-			.load(|| self::load_entry_data(&self.path(), egui_ctx))
+			.load(|| self::load_entry_data(self.path(), egui_ctx))
 			.context("Unable to get entry data")
 	}
 
@@ -121,7 +121,7 @@ impl DirEntry {
 		self.0
 			.data
 			.try_load(thread_pool, Priority::HIGH, move || {
-				self::load_entry_data(&this.path(), &egui_ctx)
+				self::load_entry_data(this.path(), &egui_ctx)
 			})
 			.context("Unable to get entry data")
 	}
@@ -258,7 +258,7 @@ fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
 	Ok(Arc::new(metadata))
 }
 
-fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
+fn load_entry_data(path: Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
 	// Test against video file formats before we need to read the file.
 	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
 	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&
@@ -273,17 +273,17 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 	if let Some(ext) = path.extension() &&
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
-		let image = EntryImage::new(egui_ctx, path, format).context("Unable to create image")?;
+		let image = EntryImage::new(egui_ctx, &path, format).context("Unable to create image")?;
 		return Ok(EntryData::Image(image));
 	}
 
 	// Otherwise, try to guess it by opening it with `image`
-	let reader = ::image::ImageReader::open(path)
+	let reader = ::image::ImageReader::open(&path)
 		.context("Unable to create image reader")?
 		.with_guessed_format()
 		.context("Unable to read file")?;
 	if let Some(format) = reader.format() {
-		let image = EntryImage::new(egui_ctx, path, format).context("Unable to create image")?;
+		let image = EntryImage::new(egui_ctx, &path, format).context("Unable to create image")?;
 		return Ok(EntryData::Image(image));
 	}
 
@@ -294,7 +294,7 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 	//       `svg_pipe`). However, `image` doesn't support `svg`s,
 	//       so for now we allow this.
 	const DISALLOWED_VIDEO_FORMATS: &[&str] = &["lrc", "tty"];
-	if let Ok(input) = ffmpeg_next::format::input(path) &&
+	if let Ok(input) = ffmpeg_next::format::input(&path) &&
 		!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
 	{
 		let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;

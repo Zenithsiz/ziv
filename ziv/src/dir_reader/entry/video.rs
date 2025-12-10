@@ -27,6 +27,8 @@ pub enum PlayingStatus {
 
 #[derive(Debug)]
 struct State {
+	path:           Arc<Path>,
+	started:        bool,
 	onscreen:       bool,
 	playing_status: PlayingStatus,
 	duration:       Option<Duration>,
@@ -52,7 +54,7 @@ pub struct EntryVideo {
 impl EntryVideo {
 	/// Creates a new video, not playing
 	#[expect(clippy::unnecessary_wraps, reason = "We'll be fallible eventually")]
-	pub fn new(egui_ctx: &egui::Context, path: &Arc<Path>) -> Result<Self, AppError> {
+	pub fn new(egui_ctx: &egui::Context, path: Arc<Path>) -> Result<Self, AppError> {
 		// TODO: This filter should be customizable
 		let options = egui::TextureOptions::LINEAR;
 		let texture_handle = egui_ctx.load_texture(
@@ -64,18 +66,30 @@ impl EntryVideo {
 		let inner = Arc::new(Inner {
 			texture_handle,
 			state: Mutex::new(State {
-				onscreen:       false,
-				// TODO: Should we start playing?
+				path,
+				started: false,
+				onscreen: false,
 				playing_status: PlayingStatus::Playing,
-				duration:       None,
-				start_time:     None,
-				cur_time:       Duration::ZERO,
-				seek_to:        None,
+				duration: None,
+				start_time: None,
+				cur_time: Duration::ZERO,
+				seek_to: None,
 			}),
 			condvar: Condvar::new(),
 		});
 
-		#[cloned(path, inner)]
+		Ok(Self { inner })
+	}
+
+	/// Starts the video
+	pub fn start(&self) {
+		let mut state = self.inner.state.lock();
+		if state.started {
+			return;
+		}
+		state.started = true;
+
+		#[cloned(path = state.path, inner = self.inner)]
 		let _ = std::thread::spawn(move || {
 			let res: Result<_, AppError> = try {
 				let mut thread = DecoderThread::new(inner, &path)?;
@@ -87,8 +101,12 @@ impl EntryVideo {
 				Err(err) => tracing::warn!("Unable to decode video: {err:?}"),
 			}
 		});
+		drop(state);
+	}
 
-		Ok(Self { inner })
+	/// Returns whether the video is started
+	pub fn started(&self) -> bool {
+		self.inner.state.lock().started
 	}
 
 	/// Returns the size of the video

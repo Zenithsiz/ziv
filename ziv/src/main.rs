@@ -850,6 +850,10 @@ impl EguiApp {
 			EntryData::Video(video) => {
 				let image_size = video.size();
 				if image_size == egui::Vec2::ZERO {
+					if !video.started() {
+						video.start();
+					}
+
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
 					});
