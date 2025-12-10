@@ -100,6 +100,11 @@ impl EntryImage {
 		Ok(())
 	}
 
+	/// Unloads this image
+	pub fn unload(&self) {
+		self.inner.handle.remove();
+	}
+
 	/// Returns this image's format
 	pub fn format(&self) -> ImageFormat {
 		self.inner.format

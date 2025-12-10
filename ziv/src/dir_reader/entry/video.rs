@@ -7,7 +7,7 @@ use {
 	core::{mem, time::Duration},
 	ffmpeg_next::Rescale,
 	parking_lot::{Condvar, Mutex},
-	std::{path::Path, sync::Arc, time::Instant},
+	std::{path::Path, sync::Arc, thread, time::Instant},
 	zutil_cloned::cloned,
 };
 
@@ -28,7 +28,7 @@ pub enum PlayingStatus {
 #[derive(Debug)]
 struct State {
 	path:           Arc<Path>,
-	started:        bool,
+	thread_status:  DecoderThreadStatus,
 	onscreen:       bool,
 	playing_status: PlayingStatus,
 	duration:       Option<Duration>,
@@ -68,7 +68,7 @@ impl EntryVideo {
 			texture_handle,
 			state: Mutex::new(State {
 				path,
-				started: false,
+				thread_status: DecoderThreadStatus::Stopped,
 				onscreen: false,
 				playing_status: PlayingStatus::Playing,
 				duration: None,
@@ -85,13 +85,13 @@ impl EntryVideo {
 	/// Starts the video
 	pub fn start(&self) {
 		let mut state = self.inner.state.lock();
-		if state.started {
+		if !matches!(state.thread_status, DecoderThreadStatus::Stopped) {
 			return;
 		}
-		state.started = true;
+		state.thread_status = DecoderThreadStatus::Started;
 
-		#[cloned(path = state.path, inner = self.inner)]
-		let _ = std::thread::spawn(move || {
+		#[cloned(path = state.path, inner = self.inner;)]
+		thread::spawn(move || {
 			let res: Result<_, AppError> = try {
 				let mut thread = DecoderThread::new(inner, &path)?;
 				thread.run()?
@@ -105,9 +105,19 @@ impl EntryVideo {
 		drop(state);
 	}
 
+	/// Stops the video
+	pub fn stop(&self) {
+		let mut state = self.inner.state.lock();
+		if matches!(state.thread_status, DecoderThreadStatus::Started) {
+			state.thread_status = DecoderThreadStatus::Stopping;
+			drop(state);
+			self.inner.condvar.notify_one();
+		}
+	}
+
 	/// Returns whether the video is started
 	pub fn started(&self) -> bool {
-		self.inner.state.lock().started
+		matches!(self.inner.state.lock().thread_status, DecoderThreadStatus::Started)
 	}
 
 	/// Returns the size of the video
@@ -432,8 +442,7 @@ impl DecoderThread {
 	/// Handles events, returning any user event
 	fn handle_events(&mut self) -> TryControlFlow<UserEvent, (), AppError> {
 		// Check if we should quit.
-		// TODO: We should probably use a better metric than this
-		let should_quit = Arc::strong_count(&self.inner) <= 1;
+		let should_quit = self.inner.state.lock().thread_status == DecoderThreadStatus::Stopping;
 		if should_quit {
 			return TryControlFlow::BreakOk(());
 		}
@@ -493,8 +502,23 @@ impl DecoderThread {
 	}
 }
 
+impl Drop for DecoderThread {
+	fn drop(&mut self) {
+		let mut state = self.inner.state.lock();
+		state.thread_status = DecoderThreadStatus::Stopped;
+	}
+}
+
 pub(super) const TIME_BASE_AV: ffmpeg_next::Rational = ffmpeg_next::Rational(1, ffmpeg_next::ffi::AV_TIME_BASE);
 pub(super) const TIME_BASE_MICROS: ffmpeg_next::Rational = ffmpeg_next::Rational(1, 1_000_000);
+
+/// Decoder thread status
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum DecoderThreadStatus {
+	Stopped,
+	Started,
+	Stopping,
+}
 
 /// Result from decoding a frame
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]

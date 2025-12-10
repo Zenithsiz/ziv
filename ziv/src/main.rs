@@ -371,9 +371,19 @@ impl EguiApp {
 				.shift_remove_index(to_remove_loaded_idx)
 				.expect("Just checked it wasn't empty");
 
-			// TODO: Instead of removing data, we should just unload
-			//       the image/video.
-			entry.remove_data();
+			self.with_entry(&entry, |_, entry| {
+				let Some(data) = entry.data_if_exists()? else {
+					return Ok(());
+				};
+
+				match data {
+					EntryData::Image(image) => image.unload(),
+					EntryData::Video(video) => video.stop(),
+					EntryData::Other => (),
+				}
+
+				Ok(())
+			});
 		}
 	}
 
@@ -870,13 +880,14 @@ impl EguiApp {
 				EntryData::Image(image) => image
 					.load(&this.thread_pool, egui_ctx)
 					.context("Unable to load image")?,
-				EntryData::Video(video) => {
-					// TODO: Pausing the video here means we aren't actually
-					//       preloading almost anything, just the thread initializing,
-					//       we should make it so a single frame gets rendered here.
-					video.pause();
-					video.start();
-				},
+				EntryData::Video(video) =>
+					if !video.started() {
+						// TODO: Pausing the video here means we aren't actually
+						//       preloading almost anything, just the thread initializing,
+						//       we should make it so a single frame gets rendered here.
+						video.pause();
+						video.start();
+					},
 				EntryData::Other => this.remove_entry(entry),
 			}
 
@@ -926,13 +937,13 @@ impl EguiApp {
 
 		match data {
 			EntryData::Video(video) => {
+				if !video.started() {
+					video.start();
+				}
+
 				let image_size = video.size();
 				if image_size == egui::Vec2::ZERO {
-					if !video.started() {
-						video.start();
-					}
 					video.resume();
-
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
 					});

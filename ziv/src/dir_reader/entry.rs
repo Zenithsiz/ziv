@@ -131,11 +131,6 @@ impl DirEntry {
 	pub fn data_if_exists(&self) -> Result<Option<EntryData>, AppError> {
 		self.0.data.try_get().context("Unable to get entry data")
 	}
-
-	/// Removes this entry's data
-	pub fn remove_data(&self) {
-		self.0.data.remove();
-	}
 }
 
 /// Modified date
