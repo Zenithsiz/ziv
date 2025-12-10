@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::{AppError, PriorityThreadPool, priority_thread_pool::Priority},
-	parking_lot::Mutex,
+	parking_lot::{Mutex, MutexGuard},
 };
 
 #[derive(Debug)]
@@ -88,10 +88,11 @@ impl<T, E> Loadable<T, E> {
 			return inner.value.as_mut().expect("Just checked").clone();
 		}
 
-		let res = match inner.task_rx.take() {
+		let task_rx = inner.task_rx.take();
+		let res = MutexGuard::unlocked(&mut inner, || match task_rx {
 			Some(rx) => rx.recv().expect("Loading thread panicked"),
 			None => load(),
-		};
+		});
 
 		inner.value = Some(res.clone());
 		res
