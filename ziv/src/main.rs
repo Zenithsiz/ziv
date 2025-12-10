@@ -23,7 +23,8 @@
 	try_trait_v2_residual,
 	never_type,
 	string_replace_in_place,
-	formatting_options
+	formatting_options,
+	if_let_guard
 )]
 
 // Modules
@@ -334,9 +335,12 @@ impl EguiApp {
 		if let Ok(Some(data)) = cur_entry.data_if_exists() {
 			match data {
 				EntryData::Image(image) => {
-					let size = image.size();
+					if let Ok(Some(handle)) = image.handle() {
+						let size = handle.size_vec2();
+						write_str!(title, " {}x{}", size.x, size.y);
+					}
 					let format = image.format();
-					write_str!(title, " {}x{} ({format:?})", size.x, size.y);
+					write_str!(title, " ({format:?})");
 				},
 				EntryData::Video(video) => {
 					let size = video.size();
@@ -809,6 +813,8 @@ impl EguiApp {
 			self.dir_reader.remove(&entry);
 		}
 
+		// TODO: We need to actually load the image / start the video after.
+
 		self.loaded_entries.insert(entry);
 	}
 
@@ -938,8 +944,29 @@ impl EguiApp {
 					}
 				}
 
-				let image_size = image.size();
-				let image = egui::Image::from_texture(image).sense(egui::Sense::click());
+				let handle = match image.handle() {
+					Ok(Some(handle)) => handle,
+					Ok(None) => {
+						if let Err(err) = image.load(&self.thread_pool, ui.ctx()) {
+							tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
+							self.dir_reader.remove(input.entry);
+						}
+
+						ui.centered_and_justified(|ui| {
+							ui.weak("Loading...");
+						});
+						return output;
+					},
+					Err(err) => {
+						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
+						self.dir_reader.remove(input.entry);
+						return output;
+					},
+				};
+
+				let image_size = handle.size_vec2();
+				let image = egui::Image::from_texture(egui::load::SizedTexture::from_handle(&handle))
+					.sense(egui::Sense::click());
 
 				// Note: If we're in fullscreen, we shouldn't resize yet.
 				//       If we did, the user might notice a flicker, because
@@ -1251,8 +1278,10 @@ impl EguiApp {
 												ui.ctx(),
 												self.thumbnails_dir.path(),
 											) {
-												Ok(Some(image)) => {
-													let image = egui::Image::from_texture(image)
+												// TODO: Handle errors with the handle here?
+												Ok(Some(image)) if let Ok(Some(handle)) = image.handle() => {
+													let texture = egui::load::SizedTexture::from_handle(&handle);
+													let image = egui::Image::from_texture(texture)
 														.fit_to_exact_size(image_size)
 														.show_loading_spinner(false)
 														.sense(egui::Sense::click());
@@ -1261,7 +1290,7 @@ impl EguiApp {
 														goto_entry = Some(entry.clone());
 													}
 												},
-												Ok(None) => {
+												Ok(_) => {
 													let response =
 														ui.allocate_response(image_size, egui::Sense::click());
 

@@ -29,6 +29,16 @@ impl<T, E> Loadable<T, E> {
 		}
 	}
 
+	/// Creates a new, loaded, loadable
+	pub const fn loaded(value: T) -> Self {
+		Self {
+			inner: Mutex::new(Inner {
+				value:   Some(Ok(value)),
+				task_rx: None,
+			}),
+		}
+	}
+
 	/// Sets the value, and removing the task loading it, if any
 	pub fn set(&self, value: T) {
 		let mut inner = self.inner.lock();

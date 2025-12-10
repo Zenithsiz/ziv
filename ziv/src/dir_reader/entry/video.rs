@@ -39,6 +39,7 @@ struct State {
 
 #[derive(derive_more::Debug)]
 struct Inner {
+	// TODO: Should this be optional?
 	#[debug("{:?}", self.texture_handle.id())]
 	texture_handle: egui::TextureHandle,
 	state:          Mutex<State>,

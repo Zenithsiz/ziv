@@ -273,7 +273,7 @@ fn load_entry_data(path: Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDat
 	if let Some(ext) = path.extension() &&
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
-		let image = EntryImage::new(egui_ctx, &path, format).context("Unable to create image")?;
+		let image = EntryImage::new(path, format);
 		return Ok(EntryData::Image(image));
 	}
 
@@ -283,7 +283,7 @@ fn load_entry_data(path: Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDat
 		.with_guessed_format()
 		.context("Unable to read file")?;
 	if let Some(format) = reader.format() {
-		let image = EntryImage::new(egui_ctx, &path, format).context("Unable to create image")?;
+		let image = EntryImage::new(path, format);
 		return Ok(EntryData::Image(image));
 	}
 
