@@ -11,7 +11,7 @@ use {
 	core::time::Duration,
 	ffmpeg_next::Rescale,
 	image::{DynamicImage, ImageFormat, ImageReader},
-	std::{fs, path::Path, sync::Arc},
+	std::{path::Path, sync::Arc},
 	url::Url,
 	zutil_cloned::cloned,
 };
@@ -53,15 +53,25 @@ impl EntryImage {
 		path: &Path,
 		data: &EntryData,
 	) -> Result<Self, AppError> {
-		let cache_path = {
-			let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
-			let path_uri = Url::from_file_path(&path_absolute)
-				.map_err(|()| app_error!("Unable to turn path into url: {path_absolute:?}"))?;
-			let path_md5 = md5::compute(path_uri.as_str());
-			// TODO: Should we be using `png`s for the thumbnails?
-			let thumbnail_file_name = format!("{path_md5:#x}.png");
+		// Note: If the path is inside of the thumbnail cache, just load it to avoid recursively creating
+		//       thumbnails of thumbnails.
+		// TODO: This assumes that `thumbnails_dir` is absolute, which currently is true, but we shouldn't
+		//       rely on that. On the other hand, canonicalizing it every time would be costly.
+		// TODO: Instead of this, can we just check that the actual image is smaller than 256x256 and use it
+		//       if it is?
+		let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
+		let cache_path = match path_absolute.starts_with(thumbnails_dir) {
+			true => path.to_path_buf(),
+			// Otherwise, get it's path in the cache
+			false => {
+				let path_uri = Url::from_file_path(&path_absolute)
+					.map_err(|()| app_error!("Unable to turn path into url: {path_absolute:?}"))?;
+				let path_md5 = md5::compute(path_uri.as_str());
+				// TODO: Should we be using `png`s for the thumbnails?
+				let thumbnail_file_name = format!("{path_md5:#x}.png");
 
-			thumbnails_dir.join(thumbnail_file_name)
+				thumbnails_dir.join(thumbnail_file_name)
+			},
 		};
 
 		let image = match image::open(&cache_path) {
@@ -75,7 +85,6 @@ impl EntryImage {
 				};
 
 				// TODO: Make saving the thumbnail a non-fatal error
-				fs::create_dir_all(thumbnails_dir).context("Unable to create thumbnails directory")?;
 				thumbnail.save(&cache_path).context("Unable to save thumbnail")?;
 
 				thumbnail

@@ -63,6 +63,7 @@ use {
 	itertools::Itertools,
 	std::{
 		fmt::Write,
+		fs,
 		path::{Path, PathBuf},
 		process::ExitCode,
 		sync::Arc,
@@ -206,9 +207,19 @@ impl EguiApp {
 			ctx: cc.egui_ctx.clone(),
 		});
 
+		// Create and canonicalize the thumbnail path
 		let thumbnails_dir = match config.thumbnails_cache {
 			Some(dir) => ThumbnailsDir::Specified(Arc::from(dir)),
 			None => ThumbnailsDir::Auto(Arc::clone(dirs.thumbnails())),
+		};
+		fs::create_dir_all(thumbnails_dir.path()).context("Unable to create thumbnails directory")?;
+		let path = thumbnails_dir
+			.path()
+			.canonicalize()
+			.context("Unable to canonicalize thumbnails directory")?;
+		let thumbnails_dir = match thumbnails_dir {
+			ThumbnailsDir::Auto(_) => ThumbnailsDir::Auto(Arc::from(path)),
+			ThumbnailsDir::Specified(_) => ThumbnailsDir::Specified(Arc::from(path)),
 		};
 
 		Ok(Self {
