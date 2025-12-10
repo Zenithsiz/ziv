@@ -84,7 +84,7 @@ impl DirReader {
 				if let Err(err) = Self::read(&inner, &path) {
 					tracing::error!("Unable to read directory {path:?}: {err:?}");
 				}
-				tracing::info!("Reader thread finished");
+				tracing::debug!("Reader thread finished");
 			})
 			.context("Unable to spawn read thread")?;
 
@@ -94,7 +94,7 @@ impl DirReader {
 			.name("sort".to_owned())
 			.spawn(move || {
 				Self::set_sort_order_inner(&inner, &sort_thread_rx);
-				tracing::warn!("Sorting thread returned");
+				tracing::debug!("Sorting thread finished");
 			})
 			.context("Unable to spawn read thread")?;
 
