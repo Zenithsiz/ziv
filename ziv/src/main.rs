@@ -113,7 +113,10 @@ fn run() -> Result<(), AppError> {
 		Some(path) => path,
 		None => std::env::current_dir().context("Unable to get current directory")?,
 	};
-	let native_options = eframe::NativeOptions::default();
+	let native_options = eframe::NativeOptions {
+		viewport: egui::ViewportBuilder::default().with_title("ziv").with_app_id("ziv"),
+		..eframe::NativeOptions::default()
+	};
 	eframe::run_native(
 		"ziv",
 		native_options,
