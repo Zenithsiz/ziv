@@ -279,6 +279,11 @@ fn load_entry_data(path: Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDat
 		return Ok(EntryData::Image(image));
 	}
 
+	// If it's a directory it's non-media
+	if fs::metadata(&path).context("Unable to get file metadata")?.is_dir() {
+		return Ok(EntryData::Other);
+	}
+
 	// Otherwise, try to guess it by opening it with `image`
 	let reader = ::image::ImageReader::open(&path)
 		.context("Unable to create image reader")?

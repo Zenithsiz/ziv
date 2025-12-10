@@ -25,7 +25,6 @@ use {
 	},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
-		fs::{self},
 		path::{Path, PathBuf},
 		sync::{Arc, mpsc},
 		thread,
@@ -338,8 +337,8 @@ impl DirReader {
 				continue;
 			}
 
-			if let Err(err) = Self::read_dir_entry(inner, entry_path, &entry) {
-				tracing::warn!("Unable to read directory entry {:?}: {err:?}", entry.path());
+			if let Err(err) = Self::read_dir_entry(inner, entry_path) {
+				tracing::warn!("Unable to read directory entry {entry_path:?}: {err:?}");
 			}
 		}
 
@@ -352,38 +351,20 @@ impl DirReader {
 		}
 	}
 
-	fn read_dir_entry(
-		inner: &Arc<Mutex<Inner>>,
-		path: &Path,
-		entry: &walkdir::DirEntry,
-	) -> Result<Option<DirEntry>, AppError> {
-		let file_type = entry.file_type();
-		Self::read_path_with_file_type(inner, path, MetadataOrFileType::FileType(file_type))
+	fn read_dir_entry(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
+		Self::read_path_with_file_type(inner, path)
 	}
 
 	fn read_path(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
-		// TODO: Could we get away with only getting the file type in some scenarios?
-		let metadata = fs::metadata(path).context("Unable to get metadata")?;
-		Self::read_path_with_file_type(inner, path, MetadataOrFileType::Metadata(metadata))
+		Self::read_path_with_file_type(inner, path)
 	}
 
-	fn read_path_with_file_type(
-		inner: &Arc<Mutex<Inner>>,
-		path: &Path,
-		metadata: MetadataOrFileType,
-	) -> Result<Option<DirEntry>, AppError> {
-		if metadata.file_type().is_dir() {
-			tracing::info!("Ignoring directory: {path:?}");
-			return Ok(None);
-		}
-
-		// Create the entry and add the metadata if we already have it
+	fn read_path_with_file_type(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
+		// Create the entry
 		let entry = DirEntry::new(path.to_owned());
-		if let Some(metadata) = metadata.try_into_metadata() {
-			entry.set_metadata(metadata);
-		}
 
-		// Then search to where to insert it and insert it
+		// Then insert it
+		// TODO: Here we need to check that the sort order hasn't changed while we were unlocked before inserting.
 		let mut inner = inner.lock();
 		let sort_order = inner.sort_order;
 		MutexGuard::unlocked(&mut inner, || entry.load_for_order(sort_order))?;
@@ -469,29 +450,6 @@ impl DirReader {
 			}
 
 			inner.sort_progress = None;
-		}
-	}
-}
-
-enum MetadataOrFileType {
-	Metadata(fs::Metadata),
-	FileType(fs::FileType),
-}
-
-impl MetadataOrFileType {
-	/// Returns the file type of this
-	pub fn file_type(&self) -> fs::FileType {
-		match self {
-			Self::Metadata(metadata) => metadata.file_type(),
-			Self::FileType(file_type) => *file_type,
-		}
-	}
-
-	/// Converts this into metadata, if available
-	pub const fn try_into_metadata(self) -> Option<fs::Metadata> {
-		match self {
-			Self::Metadata(metadata) => Some(metadata),
-			Self::FileType(_) => None,
 		}
 	}
 }
