@@ -199,11 +199,6 @@ impl DirReader {
 		self.inner.lock().cur_entry.is_some()
 	}
 
-	/// Removes the current entry from the list
-	pub fn cur_entry_remove(&self) {
-		self.inner.lock().cur_entry_remove();
-	}
-
 	/// Advances the current entry to the next one, wrapping around if the last entry is reached
 	pub fn cur_entry_set_next(&self) -> Option<CurEntry> {
 		self.inner.lock().cur_entry_set_next()
@@ -561,20 +556,6 @@ impl Inner {
 		};
 
 		Some(entry)
-	}
-
-	/// Removes the current entry
-	pub fn cur_entry_remove(self: &mut MutexGuard<'_, Self>) {
-		let Some(cur_entry) = self.cur_entry() else {
-			return;
-		};
-		self.entries.remove(&cur_entry.entry);
-
-		self.cur_entry = None;
-
-		// TODO: When removed, it'd be jarring to reset to the first entry,
-		//       should we just try to reset it to the previous / next entry,
-		//       if they exist?
 	}
 
 	/// Advances the current entry.

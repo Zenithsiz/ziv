@@ -24,7 +24,8 @@
 	never_type,
 	string_replace_in_place,
 	formatting_options,
-	if_let_guard
+	if_let_guard,
+	try_trait_v2_yeet
 )]
 
 // Modules
@@ -54,7 +55,11 @@ use {
 	},
 	app_error::Context,
 	clap::Parser,
-	core::{mem, time::Duration},
+	core::{
+		mem,
+		ops::{FromResidual, Yeet},
+		time::Duration,
+	},
 	egui::{
 		Widget,
 		emath::{self, GuiRounding},
@@ -279,6 +284,31 @@ impl EguiApp {
 		util::config::save(&config, &self.config_path)
 	}
 
+	// TODO: Not have to pass `&mut Self` here
+	fn try_with_entry<T>(&mut self, entry: &DirEntry, f: impl FnOnce(&mut Self, &DirEntry) -> Result<T, AppError>) -> T
+	where
+		T: FromResidual<Yeet<()>>,
+	{
+		match f(self, entry) {
+			Ok(value) => value,
+			Err(err) => {
+				tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
+				self.dir_reader.remove(entry);
+				self.loaded_entries.shift_remove(entry);
+				do yeet;
+			},
+		}
+	}
+
+	// TODO: Not have to pass `&mut Self` here
+	fn with_entry<T>(
+		&mut self,
+		entry: &DirEntry,
+		f: impl FnOnce(&mut Self, &DirEntry) -> Result<T, AppError>,
+	) -> Option<T> {
+		self.try_with_entry(entry, |this, entry| f(this, entry).map(Some))
+	}
+
 	fn reset_on_change_entry(&mut self, prev_entry: &CurEntry, new_entry: &CurEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
@@ -339,7 +369,7 @@ impl EguiApp {
 	}
 
 	/// Formats the title
-	fn title(&self, cur_entry: &CurEntry) -> String {
+	fn title(&mut self, cur_entry: &CurEntry) -> String {
 		let mut title = format!(
 			"{}/{}: {}",
 			std::fmt::from_fn(|f| match cur_entry.idx {
@@ -370,20 +400,15 @@ impl EguiApp {
 			}
 		}
 
-		match cur_entry.try_size(&self.thread_pool) {
-			Ok(Some(size)) => write_str!(title, " {}", humansize::format_size(size, humansize::BINARY)),
-			Ok(None) => (),
-			Err(err) => {
-				tracing::warn!("Unable to load size {:?}, removing: {err:?}", cur_entry.path());
-				self.dir_reader.cur_entry_remove();
-			},
+		if let Some(size) = self.try_with_entry(cur_entry, |this, entry| entry.try_size(&this.thread_pool)) {
+			write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
 		}
 
 		title
 	}
 
 	/// Draws the info window
-	fn draw_info_window(&self, ctx: &egui::Context, cur_entry: Option<&CurEntry>) {
+	fn draw_info_window(&mut self, ctx: &egui::Context, cur_entry: Option<&CurEntry>) {
 		egui::Window::new("info-window")
 			.title_bar(false)
 			.resizable(false)
@@ -826,17 +851,17 @@ impl EguiApp {
 	}
 
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
-		let res: Result<_, AppError> = try {
+		self.with_entry(entry, |this, entry| try {
 			let Some(data) = entry
-				.try_data(&self.thread_pool, egui_ctx)
+				.try_data(&this.thread_pool, egui_ctx)
 				.context("Unable to load entry data")?
 			else {
-				return;
+				return Ok(());
 			};
 
 			match data {
 				EntryData::Image(image) => image
-					.load(&self.thread_pool, egui_ctx)
+					.load(&this.thread_pool, egui_ctx)
 					.context("Unable to load image")?,
 				EntryData::Video(video) => {
 					// TODO: Pausing the video here means we aren't actually
@@ -847,13 +872,8 @@ impl EguiApp {
 				},
 			}
 
-			self.loaded_entries.insert(entry.clone());
-		};
-
-		if let Err(err) = res {
-			tracing::warn!("Unable to load image {:?}, removing: {err:?}", entry.path());
-			self.dir_reader.remove(entry);
-		}
+			this.loaded_entries.insert(entry.clone());
+		});
 	}
 
 	/// Draws an entry
@@ -873,21 +893,12 @@ impl EguiApp {
 		//       calling `try_data`, because otherwise we'd potentially
 		//       miss it.
 		self.loaded_entries.insert(input.entry.clone().into());
-		let data = match input.entry.try_data(&self.thread_pool, ui.ctx()) {
-			Ok(Some(data)) => data,
-			Ok(None) => {
-				ui.centered_and_justified(|ui| {
-					ui.weak("Loading...");
-				});
-				return output;
-			},
-			Err(err) => {
-				tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
-				self.dir_reader.remove(input.entry);
-				// TODO: Do this everywhere else too?
-				self.loaded_entries.shift_remove(&**input.entry);
-				return output;
-			},
+		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.try_data(&this.thread_pool, ui.ctx()))
+		else {
+			ui.centered_and_justified(|ui| {
+				ui.weak("Loading...");
+			});
+			return output;
 		};
 
 		// Pre-load some entries
@@ -953,24 +964,14 @@ impl EguiApp {
 			},
 
 			EntryData::Image(image) => {
-				let handle = match image.handle() {
-					Ok(Some(handle)) => handle,
-					Ok(None) => {
-						if let Err(err) = image.load(&self.thread_pool, ui.ctx()) {
-							tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
-							self.dir_reader.remove(input.entry);
-						}
-
-						ui.centered_and_justified(|ui| {
-							ui.weak("Loading...");
-						});
-						return output;
-					},
-					Err(err) => {
-						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
-						self.dir_reader.remove(input.entry);
-						return output;
-					},
+				let Some(handle) = self.try_with_entry(input.entry, |this, _| {
+					image.load(&this.thread_pool, ui.ctx())?;
+					image.handle()
+				}) else {
+					ui.centered_and_justified(|ui| {
+						ui.weak("Loading...");
+					});
+					return output;
 				};
 
 				let image_size = handle.size_vec2();
@@ -1103,6 +1104,7 @@ impl EguiApp {
 			};
 
 			// TODO: Should we make this a native viewport?
+			// TODO: These errors should be popups, not logs.
 			egui::Popup::context_menu(&response).show(|ui| {
 				if ui.button("Open").clicked() &&
 					let Err(err) = opener::open(&*cur_entry_path)
@@ -1282,38 +1284,34 @@ impl EguiApp {
 										let image_size = egui::vec2(image_width, image_height);
 
 										ui.vertical_centered_justified(|ui| {
-											match entry.thumbnail_texture(
-												&self.thread_pool,
-												ui.ctx(),
-												self.thumbnails_dir.path(),
-											) {
-												// TODO: Handle errors with the handle here?
-												Ok(Some(image)) if let Ok(Some(handle)) = image.handle() => {
+											let handle = self.try_with_entry(&entry, |this, entry| {
+												let Some(image) = entry.thumbnail_texture(
+													&this.thread_pool,
+													ui.ctx(),
+													this.thumbnails_dir.path(),
+												)?
+												else {
+													return Ok(None);
+												};
+
+												image.handle()
+											});
+
+											let response = match handle {
+												Some(handle) => {
 													let texture = egui::load::SizedTexture::from_handle(&handle);
 													let image = egui::Image::from_texture(texture)
 														.fit_to_exact_size(image_size)
 														.show_loading_spinner(false)
 														.sense(egui::Sense::click());
 
-													if ui.add(image).double_clicked() {
-														goto_entry = Some(entry.clone());
-													}
+													ui.add(image)
 												},
-												Ok(_) => {
-													let response =
-														ui.allocate_response(image_size, egui::Sense::click());
+												None => ui.allocate_response(image_size, egui::Sense::click()),
+											};
 
-													if response.double_clicked() {
-														goto_entry = Some(entry.clone());
-													}
-												},
-												Err(err) => {
-													tracing::warn!(
-														"Unable to load image {:?}, removing: {err:?}",
-														entry.path()
-													);
-													self.dir_reader.remove(&entry);
-												},
+											if response.double_clicked() {
+												goto_entry = Some(entry.clone());
 											}
 
 											let file_name_height_id = egui::Id::new(("display-list-hover", &entry));
