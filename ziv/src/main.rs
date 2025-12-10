@@ -45,7 +45,7 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{ImageDetails, ImageKind, video::PlayingStatus},
+			entry::{EntryData, ImageDetails, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -270,7 +270,7 @@ impl EguiApp {
 		};
 		self.resized_image = false;
 
-		if let Ok(Some(ImageKind::Video { video })) = prev_entry.image_kind_if_exists() &&
+		if let Ok(Some(EntryData::Video { video })) = prev_entry.data_if_exists() &&
 			video.set_offscreen()
 		{
 			video.pause();
@@ -315,7 +315,7 @@ impl EguiApp {
 				.loaded_entries
 				.shift_remove_index(to_remove_loaded_idx)
 				.expect("Just checked it wasn't empty");
-			entry.remove_kind();
+			entry.remove_data();
 		}
 	}
 
@@ -798,7 +798,7 @@ impl EguiApp {
 	}
 
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: DirEntry) {
-		if let Err(err) = entry.try_image_kind(&self.thread_pool, egui_ctx) {
+		if let Err(err) = entry.try_data(&self.thread_pool, egui_ctx) {
 			tracing::warn!("Unable to load image {:?}, removing: {err:?}", entry.path());
 			self.dir_reader.remove(&entry);
 		}
@@ -820,11 +820,11 @@ impl EguiApp {
 		}
 
 		// Note: It's important we add the entry to the loaded *before*
-		//       calling `try_image_kind`, because otherwise we'd potentially
+		//       calling `try_data`, because otherwise we'd potentially
 		//       miss it.
 		self.loaded_entries.insert(input.entry.clone().into());
-		let kind = match input.entry.try_image_kind(&self.thread_pool, ui.ctx()) {
-			Ok(Some(kind)) => kind,
+		let data = match input.entry.try_data(&self.thread_pool, ui.ctx()) {
+			Ok(Some(data)) => data,
 			Ok(None) => {
 				ui.centered_and_justified(|ui| {
 					ui.weak("Loading...");
@@ -840,8 +840,8 @@ impl EguiApp {
 			},
 		};
 
-		match kind {
-			ImageKind::Video { video } => {
+		match data {
+			EntryData::Video { video } => {
 				let image_size = video.size();
 				if image_size == egui::Vec2::ZERO {
 					ui.centered_and_justified(|ui| {
@@ -891,7 +891,7 @@ impl EguiApp {
 				}
 			},
 
-			ImageKind::Image { image, .. } => {
+			EntryData::Image { image, .. } => {
 				// TODO: Do this above
 				// Note: If there are no entries, there's no point in pre-loading.
 				//       This can happen when we start sorting and nothing has been
@@ -1174,7 +1174,7 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Ok(Some(ImageKind::Video { video })) = cur_entry.image_kind_if_exists() &&
+			let Ok(Some(EntryData::Video { video })) = cur_entry.data_if_exists() &&
 			video.set_offscreen()
 		{
 			video.pause();

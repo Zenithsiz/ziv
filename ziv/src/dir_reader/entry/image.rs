@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::ImageKind,
+	super::EntryData,
 	crate::util::AppError,
 	app_error::{Context, app_error},
 	image::{ImageFormat, ImageReader},
@@ -61,7 +61,7 @@ impl EntryImage {
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Path,
 		path: &Path,
-		kind: &ImageKind,
+		data: &EntryData,
 	) -> Result<Self, AppError> {
 		let cache_path = {
 			let path_absolute = path.canonicalize().context("Unable to canonicalize path")?;
@@ -77,12 +77,12 @@ impl EntryImage {
 		let image = match image::open(&cache_path) {
 			Ok(image) => image,
 			Err(err) => {
-				let format = match *kind {
-					ImageKind::Image { format, .. } => Some(format),
+				let format = match *data {
+					EntryData::Image { format, .. } => Some(format),
 					// Note: `image` supports gifs, so we can still generate thumbnails for them
-					ImageKind::Video { .. } if path.extension().and_then(OsStr::to_str) == Some("gif") =>
+					EntryData::Video { .. } if path.extension().and_then(OsStr::to_str) == Some("gif") =>
 						Some(ImageFormat::Gif),
-					ImageKind::Video { .. } => None,
+					EntryData::Video { .. } => None,
 				};
 
 				match format {
