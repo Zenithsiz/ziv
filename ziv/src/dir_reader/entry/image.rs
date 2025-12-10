@@ -82,6 +82,7 @@ impl EntryImage {
 					EntryData::Image(image) => self::open_with_format(path, image.format())?.thumbnail(256, 256),
 					// Note: Despite `image` supporting GIFs, we create the thumbnail as a video
 					EntryData::Video(_) => self::video_thumbnail(path)?,
+					EntryData::Other => app_error::bail!("Cannot create thumbnail for non-media file: {path:?}"),
 				};
 
 				// TODO: Make saving the thumbnail a non-fatal error

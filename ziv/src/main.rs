@@ -284,6 +284,11 @@ impl EguiApp {
 		util::config::save(&config, &self.config_path)
 	}
 
+	fn remove_entry(&mut self, entry: &DirEntry) {
+		self.dir_reader.remove(entry);
+		self.loaded_entries.shift_remove(entry);
+	}
+
 	// TODO: Not have to pass `&mut Self` here
 	fn try_with_entry<T>(&mut self, entry: &DirEntry, f: impl FnOnce(&mut Self, &DirEntry) -> Result<T, AppError>) -> T
 	where
@@ -293,8 +298,7 @@ impl EguiApp {
 			Ok(value) => value,
 			Err(err) => {
 				tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
-				self.dir_reader.remove(entry);
-				self.loaded_entries.shift_remove(entry);
+				self.remove_entry(entry);
 				do yeet;
 			},
 		}
@@ -397,6 +401,7 @@ impl EguiApp {
 						write_str!(title, " ({duration:.2?})");
 					}
 				},
+				EntryData::Other => self.remove_entry(cur_entry),
 			}
 		}
 
@@ -870,6 +875,7 @@ impl EguiApp {
 					video.pause();
 					video.start();
 				},
+				EntryData::Other => this.remove_entry(entry),
 			}
 
 			this.loaded_entries.insert(entry.clone());
@@ -999,6 +1005,8 @@ impl EguiApp {
 					&self.controls,
 				));
 			},
+
+			EntryData::Other => self.remove_entry(input.entry),
 		}
 
 		output

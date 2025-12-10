@@ -251,6 +251,7 @@ impl Hash for DirEntry {
 pub enum EntryData {
 	Image(EntryImage),
 	Video(EntryVideo),
+	Other,
 }
 
 fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
@@ -301,5 +302,5 @@ fn load_entry_data(path: Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDat
 		return Ok(EntryData::Video(video));
 	}
 
-	app_error::bail!("Unable to guess image kind");
+	Ok(EntryData::Other)
 }
