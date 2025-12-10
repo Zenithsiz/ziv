@@ -42,8 +42,6 @@ struct Inner {
 	metadata:          Loadable<Arc<Metadata>>,
 	image_kind:        Loadable<ImageKind>,
 	modified_date:     Loadable<SystemTime>,
-	texture:           Loadable<EntryImage>,
-	video:             Loadable<EntryVideo>,
 	thumbnail_texture: Loadable<EntryImage>,
 	image_details:     Option<ImageDetails>,
 }
@@ -59,8 +57,6 @@ impl DirEntry {
 			metadata:          Loadable::new(),
 			image_kind:        Loadable::new(),
 			modified_date:     Loadable::new(),
-			texture:           Loadable::new(),
-			video:             Loadable::new(),
 			thumbnail_texture: Loadable::new(),
 			image_details:     None,
 		})))
@@ -112,24 +108,45 @@ impl DirEntry {
 	}
 
 	/// Gets the image kind, blocking
-	fn image_kind_blocking(&self) -> Result<ImageKind, AppError> {
+	fn image_kind_blocking(&self, egui_ctx: &egui::Context) -> Result<ImageKind, AppError> {
 		self.0
 			.lock()
 			.image_kind
-			.load(|| self::load_image_kind(&self.path()))
+			.load(|| self::load_image_kind(&self.path(), egui_ctx))
 			.context("Unable to get image kind")
 			.cloned()
 	}
 
 	/// Returns this image's kind
-	pub fn try_image_kind(&self, thread_pool: &PriorityThreadPool) -> Result<Option<ImageKind>, AppError> {
-		#[cloned(this = self)]
+	pub fn try_image_kind(
+		&self,
+		thread_pool: &PriorityThreadPool,
+		egui_ctx: &egui::Context,
+	) -> Result<Option<ImageKind>, AppError> {
+		#[cloned(this = self, egui_ctx)]
 		self.0
 			.lock()
 			.image_kind
-			.try_load(thread_pool, Priority::HIGH, move || self::load_image_kind(&this.path()))
+			.try_load(thread_pool, Priority::HIGH, move || {
+				self::load_image_kind(&this.path(), &egui_ctx)
+			})
 			.map(OptionClonedMut::cloned_mut)
 			.context("Unable to get image kind")
+	}
+
+	/// Returns this image's kind
+	pub fn image_kind_if_exists(&self) -> Result<Option<ImageKind>, AppError> {
+		self.0
+			.lock()
+			.image_kind
+			.try_get()
+			.map(OptionClonedMut::cloned_mut)
+			.context("Unable to get image kind")
+	}
+
+	/// Removes this image's kind
+	pub fn remove_kind(&self) {
+		self.0.lock().image_kind.remove();
 	}
 
 	/// Gets the modified date, blocking
@@ -175,64 +192,6 @@ impl DirEntry {
 		Ok(Some(metadata.len()))
 	}
 
-	/// Returns this image's texture
-	pub fn texture(
-		&self,
-		thread_pool: &PriorityThreadPool,
-		egui_ctx: &egui::Context,
-	) -> Result<Option<EntryImage>, AppError> {
-		#[cloned(this = self, egui_ctx)]
-		self.0
-			.lock()
-			.texture
-			.try_load(thread_pool, Priority::HIGH, move || {
-				let ImageKind::Image { format } = this.image_kind_blocking().context("Unable to get image kind")?
-				else {
-					app_error::bail!("Cannot load a video's texture");
-				};
-				EntryImage::new(&egui_ctx, &this.path(), format)
-			})
-			.map(OptionClonedMut::cloned_mut)
-			.cloned_err_mut()
-	}
-
-	/// Removes this image's texture
-	pub fn remove_texture(&self) {
-		self.0.lock().texture.remove();
-	}
-
-	/// Returns this image's video
-	pub fn video(
-		&self,
-		thread_pool: &PriorityThreadPool,
-		egui_ctx: &egui::Context,
-	) -> Result<Option<EntryVideo>, AppError> {
-		#[cloned(this = self, egui_ctx)]
-		self.0
-			.lock()
-			.video
-			.try_load(thread_pool, Priority::HIGH, move || {
-				EntryVideo::new(&egui_ctx, &this.path())
-			})
-			.map(OptionClonedMut::cloned_mut)
-			.cloned_err_mut()
-	}
-
-	/// Returns this image's video, without loading it
-	pub fn video_if_exists(&self) -> Result<Option<EntryVideo>, AppError> {
-		self.0
-			.lock()
-			.video
-			.try_get()
-			.map(OptionClonedMut::cloned_mut)
-			.cloned_err_mut()
-	}
-
-	/// Removes this image's video
-	pub fn remove_video(&self) {
-		self.0.lock().video.remove();
-	}
-
 	/// Returns this image's thumbnail texture
 	pub fn thumbnail_texture(
 		&self,
@@ -245,16 +204,13 @@ impl DirEntry {
 			.lock()
 			.thumbnail_texture
 			.try_load(thread_pool, Priority::LOW, move || {
-				let kind = this.image_kind_blocking().context("Unable to get image kind")?;
-				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), kind)
+				let kind = this
+					.image_kind_blocking(&egui_ctx)
+					.context("Unable to get image kind")?;
+				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &this.path(), &kind)
 			})
 			.map(OptionClonedMut::cloned_mut)
 			.cloned_err_mut()
-	}
-
-	/// Removes this image's thumbnail texture
-	pub fn _remove_thumbnail_texture(&self) {
-		self.0.lock().texture.remove();
 	}
 
 	/// Compares two directory entries according to a sort order
@@ -327,10 +283,11 @@ pub enum ImageDetails {
 }
 
 /// Image kind
-#[derive(Clone, Copy, Debug)]
+// TODO: Rename this.
+#[derive(Clone, Debug)]
 pub enum ImageKind {
-	Image { format: ImageFormat },
-	Video,
+	Image { format: ImageFormat, image: EntryImage },
+	Video { video: EntryVideo },
 }
 
 fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
@@ -338,13 +295,15 @@ fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
 	Ok(Arc::new(metadata))
 }
 
-fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
+fn load_image_kind(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<ImageKind, AppError> {
 	// Test against video file formats before we need to read the file.
 	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
 	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&
 		COMMON_VIDEO_FORMATS.contains(&ext)
 	{
-		return Ok(ImageKind::Video);
+		return Ok(ImageKind::Video {
+			video: EntryVideo::new(egui_ctx, path).context("Unable to create video")?,
+		});
 	}
 
 	// If we got a format just from the path, return it
@@ -352,7 +311,10 @@ fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
 	if let Some(ext) = path.extension() &&
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
-		return Ok(ImageKind::Image { format });
+		return Ok(ImageKind::Image {
+			format,
+			image: EntryImage::new(egui_ctx, path, format).context("Unable to create image")?,
+		});
 	}
 
 	// Otherwise, try to guess it by opening it with `image`
@@ -361,7 +323,10 @@ fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
 		.with_guessed_format()
 		.context("Unable to read file")?;
 	if let Some(format) = reader.format() {
-		return Ok(ImageKind::Image { format });
+		return Ok(ImageKind::Image {
+			format,
+			image: EntryImage::new(egui_ctx, path, format).context("Unable to create image")?,
+		});
 	}
 
 	// Then finally, try to guess it with `ffmpeg`.
@@ -374,7 +339,9 @@ fn load_image_kind(path: &Path) -> Result<ImageKind, AppError> {
 	if let Ok(input) = ffmpeg_next::format::input(path) &&
 		!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
 	{
-		return Ok(ImageKind::Video);
+		return Ok(ImageKind::Video {
+			video: EntryVideo::new(egui_ctx, path).context("Unable to create video")?,
+		});
 	}
 
 	app_error::bail!("Unable to guess image kind");

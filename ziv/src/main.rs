@@ -270,7 +270,7 @@ impl EguiApp {
 		};
 		self.resized_image = false;
 
-		if let Ok(Some(video)) = prev_entry.video_if_exists() &&
+		if let Ok(Some(ImageKind::Video { video })) = prev_entry.image_kind_if_exists() &&
 			video.set_offscreen()
 		{
 			video.pause();
@@ -315,8 +315,7 @@ impl EguiApp {
 				.loaded_entries
 				.shift_remove_index(to_remove_loaded_idx)
 				.expect("Just checked it wasn't empty");
-			entry.remove_texture();
-			entry.remove_video();
+			entry.remove_kind();
 		}
 	}
 
@@ -798,21 +797,8 @@ impl EguiApp {
 		}
 	}
 
-	fn preload_entry_inner(&self, egui_ctx: &egui::Context, entry: &DirEntry) -> Result<(), AppError> {
-		let Some(kind) = entry.try_image_kind(&self.thread_pool)? else {
-			return Ok(());
-		};
-
-		match kind {
-			ImageKind::Image { .. } => _ = entry.texture(&self.thread_pool, egui_ctx)?,
-			ImageKind::Video => _ = entry.video(&self.thread_pool, egui_ctx)?,
-		}
-
-		Ok(())
-	}
-
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: DirEntry) {
-		if let Err(err) = self.preload_entry_inner(egui_ctx, &entry) {
+		if let Err(err) = entry.try_image_kind(&self.thread_pool, egui_ctx) {
 			tracing::warn!("Unable to load image {:?}, removing: {err:?}", entry.path());
 			self.dir_reader.remove(&entry);
 		}
@@ -833,37 +819,29 @@ impl EguiApp {
 			self.vertical_pan_smooth = 0.0;
 		}
 
-		let kind = match input.entry.try_image_kind(&self.thread_pool) {
+		// Note: It's important we add the entry to the loaded *before*
+		//       calling `try_image_kind`, because otherwise we'd potentially
+		//       miss it.
+		self.loaded_entries.insert(input.entry.clone().into());
+		let kind = match input.entry.try_image_kind(&self.thread_pool, ui.ctx()) {
 			Ok(Some(kind)) => kind,
-			Ok(None) => return output,
+			Ok(None) => {
+				ui.centered_and_justified(|ui| {
+					ui.weak("Loading...");
+				});
+				return output;
+			},
 			Err(err) => {
 				tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
 				self.dir_reader.remove(input.entry);
+				// TODO: Do this everywhere else too?
+				self.loaded_entries.shift_remove(&**input.entry);
 				return output;
 			},
 		};
 
 		match kind {
-			ImageKind::Video => {
-				// Note: It's important we check the loaded video *before*
-				//       returning, else we could accumulate a bunch of loading
-				//       videos
-				let video = match input.entry.video(&self.thread_pool, ui.ctx()) {
-					Ok(texture) => texture,
-					Err(err) => {
-						tracing::warn!("Unable to load video {:?}, removing: {err:?}", input.entry.path());
-						self.dir_reader.cur_entry_remove();
-						return output;
-					},
-				};
-				self.loaded_entries.insert(input.entry.clone().into());
-
-				let Some(video) = video else {
-					ui.centered_and_justified(|ui| {
-						ui.weak("Loading...");
-					});
-					return output;
-				};
+			ImageKind::Video { video } => {
 				let image_size = video.size();
 				if image_size == egui::Vec2::ZERO {
 					ui.centered_and_justified(|ui| {
@@ -913,20 +891,8 @@ impl EguiApp {
 				}
 			},
 
-			ImageKind::Image { .. } => {
-				// Note: It's important we check the loaded textures *before*
-				//       returning, else we could accumulate a bunch of loading
-				//       textures
-				let image = match input.entry.texture(&self.thread_pool, ui.ctx()) {
-					Ok(texture) => texture,
-					Err(err) => {
-						tracing::warn!("Unable to load image {:?}, removing: {err:?}", input.entry.path());
-						self.dir_reader.cur_entry_remove();
-						return output;
-					},
-				};
-				self.loaded_entries.insert(input.entry.clone().into());
-
+			ImageKind::Image { image, .. } => {
+				// TODO: Do this above
 				// Note: If there are no entries, there's no point in pre-loading.
 				//       This can happen when we start sorting and nothing has been
 				//       added back in yet.
@@ -970,13 +936,6 @@ impl EguiApp {
 						}
 					}
 				}
-
-				let Some(image) = image else {
-					ui.centered_and_justified(|ui| {
-						ui.weak("Loading...");
-					});
-					return output;
-				};
 
 				let image_size = image.size();
 				let image = egui::Image::from_texture(image).sense(egui::Sense::click());
@@ -1215,7 +1174,7 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Ok(Some(video)) = cur_entry.video_if_exists() &&
+			let Ok(Some(ImageKind::Video { video })) = cur_entry.image_kind_if_exists() &&
 			video.set_offscreen()
 		{
 			video.pause();
