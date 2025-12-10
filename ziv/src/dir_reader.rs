@@ -224,8 +224,9 @@ impl DirReader {
 	}
 
 	/// Removes an entry from the list
-	pub fn remove(&self, entry: &DirEntry) {
-		self.inner.lock().remove(entry);
+	pub fn remove(&self, entry: &DirEntry) -> Result<(), AppError> {
+		// TODO: Expose whether it existed or not?
+		self.inner.lock().remove(entry).map(|_| ())
 	}
 
 	/// Returns the number of entries
@@ -308,7 +309,10 @@ impl DirReader {
 						notify::EventKind::Remove(_) |
 						notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::From)) =>
 							for path in event.paths {
-								inner.lock().remove_by_path(&path);
+								let res = inner.lock().remove_by_path(&path);
+								if let Err(err) = res {
+									tracing::warn!("Unable to remove entry {path:?}: {err:?}");
+								}
 							},
 						_ => tracing::trace!("Ignoring watch event"),
 					}
@@ -360,16 +364,9 @@ impl DirReader {
 	}
 
 	fn read_path_with_file_type(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
-		// Create the entry
+		// Create the entry and insert it
 		let entry = DirEntry::new(path.to_owned());
-
-		// Then insert it
-		// TODO: Here we need to check that the sort order hasn't changed while we were unlocked before inserting.
-		let mut inner = inner.lock();
-		let sort_order = inner.sort_order;
-		MutexGuard::unlocked(&mut inner, || entry.load_for_order(sort_order))?;
-		inner.insert(entry.clone());
-		drop(inner);
+		inner.lock().insert(&entry)?;
 
 		Ok(Some(entry))
 	}
@@ -441,9 +438,8 @@ impl DirReader {
 					break;
 				}
 
-				match MutexGuard::unlocked(&mut inner, || entry.load_for_order(sort_order)) {
-					Ok(()) => inner.insert(entry),
-					Err(err) => tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path()),
+				if let Err(err) = inner.insert(&entry) {
+					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
 				}
 
 				inner.sort_progress.as_mut().expect("We just inserted it").sorted += 1;
@@ -583,19 +579,13 @@ impl Inner {
 	///
 	/// See [`DirReader::cur_entry_set`] for details
 	pub fn cur_entry_set(&mut self, entry: DirEntry) {
+		// TODO: Should we ensure the entry is loaded before setting it as the current entry?
 		self.cur_entry = Some(CurEntry { entry, idx: None });
 	}
 
 	/// Binary searches the index of `entry`.
 	pub fn search(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<usize, AppError> {
-		loop {
-			let sort_order = self.sort_order;
-			MutexGuard::unlocked(self, || entry.load_for_order(sort_order))?;
-			if self.sort_order == sort_order {
-				break;
-			}
-		}
-
+		self.load(entry)?;
 		let idx = self.entries.search(entry);
 
 		Ok(idx)
@@ -613,7 +603,7 @@ impl Inner {
 
 	/// Renames an entry
 	pub fn rename(&self, from_path: &Path, to_path: PathBuf) {
-		// TODO: Both of these are `O(N)`
+		// TODO: This is `O(N)`
 		let Some(entry) = self.entries.iter().find(|entry| &*entry.path() == from_path) else {
 			return;
 		};
@@ -621,10 +611,11 @@ impl Inner {
 		entry.rename(to_path);
 	}
 
-	/// Removes an entry by path
-	pub fn remove(&mut self, entry: &DirEntry) -> bool {
+	/// Removes an entry
+	pub fn remove(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<bool, AppError> {
+		self.load(entry)?;
 		if !self.entries.remove(entry) {
-			return false;
+			return Ok(false);
 		}
 
 		if let Some(cur_entry) = &self.cur_entry &&
@@ -633,20 +624,23 @@ impl Inner {
 			self.cur_entry = None;
 		}
 
-		true
+		Ok(true)
 	}
 
 	/// Removes an entry by path
-	pub fn remove_by_path(&mut self, path: &Path) -> Option<DirEntry> {
+	pub fn remove_by_path(self: &mut MutexGuard<'_, Self>, path: &Path) -> Result<Option<DirEntry>, AppError> {
 		// TODO: Make finding by path not `O(N)`?
-		let entry = self.entries.iter().find(|entry| &*entry.path() == path)?.clone();
-		assert!(self.remove(&entry));
+		let Some(entry) = self.entries.iter().find(|entry| &*entry.path() == path).cloned() else {
+			return Ok(None);
+		};
+		assert!(self.remove(&entry)?);
 
-		Some(entry)
+		Ok(Some(entry))
 	}
 
 	/// Inserts an entry
-	pub fn insert(self: &mut MutexGuard<'_, Self>, entry: DirEntry) {
+	pub fn insert(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<(), AppError> {
+		self.load(entry)?;
 		self.entries.insert(entry.clone());
 
 		// TODO: Update the index instead of discarding it?
@@ -657,6 +651,21 @@ impl Inner {
 		if let Some(visitor) = self.visitor.as_ref().map(Arc::clone) {
 			MutexGuard::unlocked(self, || visitor.entry_added(entry));
 		}
+
+		Ok(())
+	}
+
+	/// Loads an entry for the current sort order
+	pub fn load(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<(), AppError> {
+		loop {
+			let sort_order = self.sort_order;
+			MutexGuard::unlocked(self, || entry.load_for_order(sort_order))?;
+			if self.sort_order == sort_order {
+				break;
+			}
+		}
+
+		Ok(())
 	}
 }
 
@@ -690,5 +699,5 @@ impl PartialEq<CurEntry> for DirEntry {
 /// Visitor
 pub trait Visitor {
 	/// Called when a new entry was added
-	fn entry_added(&self, dir_entry: DirEntry);
+	fn entry_added(&self, dir_entry: &DirEntry);
 }

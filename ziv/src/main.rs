@@ -285,7 +285,12 @@ impl EguiApp {
 	}
 
 	fn remove_entry(&mut self, entry: &DirEntry) {
-		self.dir_reader.remove(entry);
+		// Note: An error here only happens if the entry wasn't already in
+		//       the list and it failed to be loaded, so either way it's no
+		//       longer on the list and thus we're fine to just log and continue
+		if let Err(err) = self.dir_reader.remove(entry) {
+			tracing::warn!("Unable to remove entry {:?}: {err:?}", entry.path());
+		}
 		self.loaded_entries.shift_remove(entry);
 	}
 
@@ -1464,7 +1469,7 @@ struct DirReaderVisitor {
 }
 
 impl dir_reader::Visitor for DirReaderVisitor {
-	fn entry_added(&self, _dir_entry: DirEntry) {
+	fn entry_added(&self, _dir_entry: &DirEntry) {
 		self.ctx.request_repaint();
 	}
 }
