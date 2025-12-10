@@ -122,8 +122,19 @@ pub impl Instant {
 
 /// Hot reloads a numeric value from a file
 #[expect(dead_code, reason = "It should only be used for debugging")]
-pub fn hot_reload<T: DeserializeOwned>(path: impl AsRef<Path>, default: T) -> T {
+pub fn hot_reload<T: Serialize + DeserializeOwned>(path: impl AsRef<Path>, default: T) -> T {
 	let path = path.as_ref();
+	if fs::exists(path).is_ok_and(|exists| !exists) {
+		let res: Result<_, AppError> = try {
+			let contents = toml::to_string_pretty(&default)?;
+			fs::write(path, &contents)?;
+		};
+
+		if let Err(err) = res {
+			tracing::warn!("Unable to write default value to {path:?}: {err:?}");
+		}
+	}
+
 	let res: Result<_, AppError> = try {
 		let contents = fs::read(path).context("Unable to read file")?;
 		toml::from_slice(&contents).context("Unable to parse file")?
