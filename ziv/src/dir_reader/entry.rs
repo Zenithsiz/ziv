@@ -23,7 +23,7 @@ use {
 	},
 	::image::ImageFormat,
 	app_error::Context,
-	core::{cmp::Ordering, hash::Hash, time::Duration},
+	core::{cmp::Ordering, hash::Hash},
 	parking_lot::Mutex,
 	std::{
 		ffi::{OsStr, OsString},
@@ -43,7 +43,6 @@ struct Inner {
 	data:              Loadable<EntryData>,
 	modified_date:     Loadable<SystemTime>,
 	thumbnail_texture: Loadable<EntryImage>,
-	image_details:     Option<ImageDetails>,
 }
 
 #[derive(Clone, derive_more::Debug)]
@@ -58,7 +57,6 @@ impl DirEntry {
 			data:              Loadable::new(),
 			modified_date:     Loadable::new(),
 			thumbnail_texture: Loadable::new(),
-			image_details:     None,
 		})))
 	}
 
@@ -162,21 +160,6 @@ impl DirEntry {
 			.cloned_err_mut()
 	}
 
-	/// Returns the image details of this entry
-	pub fn image_details(&self) -> Option<ImageDetails> {
-		self.0.lock().image_details.clone()
-	}
-
-	/// Returns if this entry contains image details
-	pub fn has_image_details(&self) -> bool {
-		self.0.lock().image_details.is_some()
-	}
-
-	/// Sets the image details of this entry
-	pub fn set_image_details(&self, image_details: ImageDetails) {
-		self.0.lock().image_details = Some(image_details);
-	}
-
 	/// Gets the size, blocking
 	fn size_blocking(&self) -> Result<u64, AppError> {
 		let metadata = self.metadata_blocking()?;
@@ -271,13 +254,6 @@ impl Hash for DirEntry {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
 		Arc::as_ptr(&self.0).hash(state);
 	}
-}
-
-/// Image details for an entry
-#[derive(Clone, Debug)]
-pub enum ImageDetails {
-	Image { size: egui::Vec2 },
-	Video { size: egui::Vec2, duration: Duration },
 }
 
 /// Entry data

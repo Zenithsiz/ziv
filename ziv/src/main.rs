@@ -45,7 +45,7 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{EntryData, ImageDetails, video::PlayingStatus},
+			entry::{EntryData, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -331,13 +331,18 @@ impl EguiApp {
 			cur_entry.path().file_name().expect("Entry had no file name").display()
 		);
 
-		if let Some(img) = cur_entry.image_details() {
-			match img {
-				ImageDetails::Image { size } => {
-					write_str!(title, " {}x{}", size.x, size.y);
+		if let Ok(Some(data)) = cur_entry.data_if_exists() {
+			match data {
+				EntryData::Image { image, format } => {
+					let size = image.size();
+					write_str!(title, " {}x{} ({format:?})", size.x, size.y);
 				},
-				ImageDetails::Video { size, duration } => {
-					write_str!(title, " {}x{} ({duration:.2?})", size.x, size.y);
+				EntryData::Video { video } => {
+					let size = video.size();
+					write_str!(title, " {}x{}", size.x, size.y);
+					if let Some(duration) = video.duration() {
+						write_str!(title, " ({duration:.2?})");
+					}
 				},
 			}
 		}
@@ -880,15 +885,6 @@ impl EguiApp {
 					&self.controls,
 				));
 				self.draw_video_controls(ui, input, &video);
-
-				if !input.entry.has_image_details() &&
-					let Some(duration) = video.duration()
-				{
-					input.entry.set_image_details(ImageDetails::Video {
-						size: image_size,
-						duration,
-					});
-				}
 			},
 
 			EntryData::Image { image, .. } => {
@@ -960,10 +956,6 @@ impl EguiApp {
 					vertical_pan,
 					&self.controls,
 				));
-
-				if !input.entry.has_image_details() {
-					input.entry.set_image_details(ImageDetails::Image { size: image_size });
-				}
 			},
 		}
 
