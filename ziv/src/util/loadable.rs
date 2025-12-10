@@ -1,49 +1,66 @@
 //! A loadable value
 
 // Imports
-use super::{AppError, PriorityThreadPool, priority_thread_pool::Priority};
+use {
+	super::{AppError, PriorityThreadPool, priority_thread_pool::Priority},
+	parking_lot::Mutex,
+};
+
+#[derive(Debug)]
+struct Inner<T, E> {
+	value:   Option<Result<T, E>>,
+	task_rx: Option<oneshot::Receiver<Result<T, E>>>,
+}
 
 /// Loadable value
 #[derive(Debug)]
 pub struct Loadable<T, E = AppError> {
-	value:   Option<Result<T, E>>,
-	task_rx: Option<oneshot::Receiver<Result<T, E>>>,
+	inner: Mutex<Inner<T, E>>,
 }
 
 impl<T, E> Loadable<T, E> {
 	/// Creates a new, empty, loadable
 	pub const fn new() -> Self {
 		Self {
-			value:   None,
-			task_rx: None,
+			inner: Mutex::new(Inner {
+				value:   None,
+				task_rx: None,
+			}),
 		}
 	}
 
 	/// Sets the value, and removing the task loading it, if any
-	pub fn set(&mut self, value: T) {
-		self.value = Some(Ok(value));
-		self.task_rx = None;
+	pub fn set(&self, value: T) {
+		let mut inner = self.inner.lock();
+		inner.value = Some(Ok(value));
+		inner.task_rx = None;
 	}
 
 	/// Removes the value and the task loading it, if any
-	pub fn remove(&mut self) {
-		self.value = None;
-		self.task_rx = None;
+	pub fn remove(&self) {
+		let mut inner = self.inner.lock();
+		inner.value = None;
+		inner.task_rx = None;
 	}
 
 	/// Tries to get the value.
 	///
 	/// If unloaded and no value ready from the task, returns `Ok(None)`
-	pub fn try_get(&mut self) -> Result<Option<&mut T>, &mut E> {
+	pub fn try_get(&self) -> Result<Option<T>, E>
+	where
+		T: Clone,
+		E: Clone,
+	{
 		// TODO: Use pattern matching once polonius comes around
-		if self.value.is_some() {
-			return self.value.as_mut().expect("Just checked").as_mut().map(Some);
+		let mut inner = self.inner.lock();
+		if inner.value.is_some() {
+			return inner.value.as_ref().expect("Just checked").clone().map(Some);
 		}
 
-		let res = match &mut self.task_rx {
+		let res = match &mut inner.task_rx {
 			Some(rx) => match rx.try_recv() {
 				Ok(res) => {
-					self.task_rx = None;
+					inner.task_rx = None;
 					res
 				},
 				Err(oneshot::TryRecvError::Empty) => return Ok(None),
@@ -52,52 +69,54 @@ impl<T, E> Loadable<T, E> {
 			None => return Ok(None),
 		};
 
-		let res = self.value.insert(res);
-		res.as_mut().map(Some)
+		inner.value = Some(res.clone());
+		drop(inner);
+
+		res.map(Some)
 	}
 
 	/// Loads this value, blocking until loaded.
-	pub fn load<F>(&mut self, load: F) -> Result<&mut T, &mut E>
+	pub fn load<F>(&self, load: F) -> Result<T, E>
 	where
-		T: Send,
+		T: Clone,
+		E: Clone,
 		F: FnOnce() -> Result<T, E>,
 	{
 		// TODO: Use pattern matching once polonius comes around
-		if self.value.is_some() {
-			return self.value.as_mut().expect("Just checked").as_mut();
+		let mut inner = self.inner.lock();
+		if inner.value.is_some() {
+			return inner.value.as_mut().expect("Just checked").clone();
 		}
 
-		let res = match self.task_rx.take() {
+		let res = match inner.task_rx.take() {
 			Some(rx) => rx.recv().expect("Loading thread panicked"),
 			None => load(),
 		};
 
-		let res = self.value.insert(res);
-		res.as_mut()
+		inner.value = Some(res.clone());
+		res
 	}
 
 	/// Tries to load the value
-	pub fn try_load<F>(
-		&mut self,
-		thread_pool: &PriorityThreadPool,
-		priority: Priority,
-		load: F,
-	) -> Result<Option<&mut T>, &mut E>
+	pub fn try_load<F>(&self, thread_pool: &PriorityThreadPool, priority: Priority, load: F) -> Result<Option<T>, E>
 	where
-		T: Send + 'static,
-		E: Send + 'static,
+		T: Send + Clone + 'static,
+		E: Send + Clone + 'static,
 		F: FnOnce() -> Result<T, E> + Send + 'static,
 	{
 		// TODO: Use pattern matching once polonius comes around
-		if self.value.is_some() {
-			return self.value.as_mut().expect("Just checked").as_mut().map(Some);
+		let mut inner = self.inner.lock();
+		if inner.value.is_some() {
+			return inner.value.as_mut().expect("Just checked").clone().map(Some);
 		}
 
-		match &self.task_rx {
+		match &inner.task_rx {
 			Some(task_rx) => match task_rx.try_recv() {
 				Ok(res) => {
-					self.task_rx = None;
-					self.value.insert(res).as_mut().map(Some)
+					inner.task_rx = None;
+					inner.value = Some(res.clone());
+
+					res.map(Some)
 				},
 				Err(oneshot::TryRecvError::Empty) => Ok(None),
 				Err(oneshot::TryRecvError::Disconnected) => panic!("Loading thread panicked"),
@@ -108,7 +127,8 @@ impl<T, E> Loadable<T, E> {
 					let res = load();
 					_ = task_tx.send(res);
 				});
-				self.task_rx = Some(task_rx);
+				inner.task_rx = Some(task_rx);
+				drop(inner);
 
 				Ok(None)
 			},

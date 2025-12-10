@@ -12,15 +12,7 @@ pub use self::{image::EntryImage, video::EntryVideo};
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::{
-		AppError,
-		Loadable,
-		OptionClonedMut,
-		PriorityThreadPool,
-		ResultClonedMut,
-		ResultErrClonedMut,
-		priority_thread_pool::Priority,
-	},
+	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash},
@@ -37,7 +29,7 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	path: Arc<Path>,
+	path: Mutex<Arc<Path>>,
 
 	metadata:          Loadable<Arc<Metadata>>,
 	data:              Loadable<EntryData>,
@@ -45,17 +37,17 @@ struct Inner {
 }
 
 #[derive(Clone, derive_more::Debug)]
-pub struct DirEntry(Arc<Mutex<Inner>>);
+pub struct DirEntry(Arc<Inner>);
 
 impl DirEntry {
 	/// Creates a new directory entry
 	pub(super) fn new(path: impl Into<Arc<Path>>) -> Self {
-		Self(Arc::new(Mutex::new(Inner {
-			path:              path.into(),
+		Self(Arc::new(Inner {
+			path:              Mutex::new(path.into()),
 			metadata:          Loadable::new(),
 			data:              Loadable::new(),
 			thumbnail_texture: Loadable::new(),
-		})))
+		}))
 	}
 }
 
@@ -63,12 +55,12 @@ impl DirEntry {
 impl DirEntry {
 	/// Returns this entry's path
 	pub fn path(&self) -> Arc<Path> {
-		Arc::clone(&self.0.lock().path)
+		Arc::clone(&self.0.path.lock())
 	}
 
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
-		self.0.lock().path = path.into();
+		*self.0.path.lock() = path.into();
 	}
 }
 
@@ -86,30 +78,26 @@ impl DirEntry {
 impl DirEntry {
 	/// Gets the metadata, blocking
 	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
-		let inner = &mut *self.0.lock();
-		inner
+		self.0
 			.metadata
-			.load(|| self::load_metadata(&inner.path))
+			.load(|| self::load_metadata(&self.path()))
 			.context("Unable to get metadata")
-			.cloned_mut()
 	}
 
 	/// Tries to gets the metadata
 	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<Arc<fs::Metadata>>, AppError> {
 		#[cloned(this = self)]
 		self.0
-			.lock()
 			.metadata
 			.try_load(thread_pool, Priority::DEFAULT, move || {
 				self::load_metadata(&this.path())
 			})
-			.map(OptionClonedMut::cloned_mut)
 			.context("Unable to get metadata")
 	}
 
 	/// Sets the metadata of this entry
 	pub(super) fn set_metadata(&self, metadata: fs::Metadata) {
-		self.0.lock().metadata.set(Arc::new(metadata));
+		self.0.metadata.set(Arc::new(metadata));
 	}
 }
 
@@ -117,12 +105,10 @@ impl DirEntry {
 impl DirEntry {
 	/// Gets the entry's data, blocking
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
-		let inner = &mut *self.0.lock();
-		inner
+		self.0
 			.data
-			.load(|| self::load_entry_data(&inner.path, egui_ctx))
+			.load(|| self::load_entry_data(&self.path(), egui_ctx))
 			.context("Unable to get entry data")
-			.cloned()
 	}
 
 	/// Returns this entry's data
@@ -133,28 +119,21 @@ impl DirEntry {
 	) -> Result<Option<EntryData>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0
-			.lock()
 			.data
 			.try_load(thread_pool, Priority::HIGH, move || {
 				self::load_entry_data(&this.path(), &egui_ctx)
 			})
-			.map(OptionClonedMut::cloned_mut)
 			.context("Unable to get entry data")
 	}
 
 	/// Returns this entry's data
 	pub fn data_if_exists(&self) -> Result<Option<EntryData>, AppError> {
-		self.0
-			.lock()
-			.data
-			.try_get()
-			.map(OptionClonedMut::cloned_mut)
-			.context("Unable to get entry data")
+		self.0.data.try_get().context("Unable to get entry data")
 	}
 
 	/// Removes this entry's data
 	pub fn remove_data(&self) {
-		self.0.lock().data.remove();
+		self.0.data.remove();
 	}
 }
 
@@ -195,16 +174,11 @@ impl DirEntry {
 		thumbnails_dir: &Arc<Path>,
 	) -> Result<Option<EntryImage>, AppError> {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
-		self.0
-			.lock()
-			.thumbnail_texture
-			.try_load(thread_pool, Priority::LOW, move || {
-				let path = this.path();
-				let data = this.data_blocking(&egui_ctx).context("Unable to get image kind")?;
-				EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &path, &data)
-			})
-			.map(OptionClonedMut::cloned_mut)
-			.cloned_err_mut()
+		self.0.thumbnail_texture.try_load(thread_pool, Priority::LOW, move || {
+			let path = this.path();
+			let data = this.data_blocking(&egui_ctx).context("Unable to get image kind")?;
+			EntryImage::thumbnail(&egui_ctx, &thumbnails_dir, &path, &data)
+		})
 	}
 }
 
