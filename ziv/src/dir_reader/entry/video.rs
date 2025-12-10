@@ -474,8 +474,8 @@ impl DecoderThread {
 	}
 }
 
-const TIME_BASE_AV: ffmpeg_next::Rational = ffmpeg_next::Rational(1, ffmpeg_next::ffi::AV_TIME_BASE);
-const TIME_BASE_MICROS: ffmpeg_next::Rational = ffmpeg_next::Rational(1, 1_000_000);
+pub(super) const TIME_BASE_AV: ffmpeg_next::Rational = ffmpeg_next::Rational(1, ffmpeg_next::ffi::AV_TIME_BASE);
+pub(super) const TIME_BASE_MICROS: ffmpeg_next::Rational = ffmpeg_next::Rational(1, 1_000_000);
 
 /// Result from decoding a frame
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
