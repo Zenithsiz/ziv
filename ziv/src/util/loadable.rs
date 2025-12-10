@@ -40,8 +40,15 @@ impl<T, E> Loadable<T, E> {
 			return self.value.as_mut().expect("Just checked").as_mut().map(Some);
 		}
 
-		let res = match self.task_rx.take() {
-			Some(rx) => rx.recv().expect("Loading thread panicked"),
+		let res = match &mut self.task_rx {
+			Some(rx) => match rx.try_recv() {
+				Ok(res) => {
+					self.task_rx = None;
+					res
+				},
+				Err(oneshot::TryRecvError::Empty) => return Ok(None),
+				Err(oneshot::TryRecvError::Disconnected) => panic!("Loading thread panicked"),
+			},
 			None => return Ok(None),
 		};
 
