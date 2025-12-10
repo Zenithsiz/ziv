@@ -80,11 +80,11 @@ impl EntryImage {
 			Ok(image) => image,
 			Err(err) => {
 				let format = match data {
-					EntryData::Image { image } => Some(image.format),
+					EntryData::Image(image) => Some(image.format),
 					// Note: `image` supports gifs, so we can still generate thumbnails for them
-					EntryData::Video { .. } if path.extension().and_then(OsStr::to_str) == Some("gif") =>
+					EntryData::Video(_) if path.extension().and_then(OsStr::to_str) == Some("gif") =>
 						Some(ImageFormat::Gif),
-					EntryData::Video { .. } => None,
+					EntryData::Video(_) => None,
 				};
 
 				match format {

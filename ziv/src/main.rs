@@ -270,7 +270,7 @@ impl EguiApp {
 		};
 		self.resized_image = false;
 
-		if let Ok(Some(EntryData::Video { video })) = prev_entry.data_if_exists() &&
+		if let Ok(Some(EntryData::Video(video))) = prev_entry.data_if_exists() &&
 			video.set_offscreen()
 		{
 			video.pause();
@@ -333,12 +333,12 @@ impl EguiApp {
 
 		if let Ok(Some(data)) = cur_entry.data_if_exists() {
 			match data {
-				EntryData::Image { image } => {
+				EntryData::Image(image) => {
 					let size = image.size();
 					let format = image.format();
 					write_str!(title, " {}x{} ({format:?})", size.x, size.y);
 				},
-				EntryData::Video { video } => {
+				EntryData::Video(video) => {
 					let size = video.size();
 					write_str!(title, " {}x{}", size.x, size.y);
 					if let Some(duration) = video.duration() {
@@ -847,7 +847,7 @@ impl EguiApp {
 		};
 
 		match data {
-			EntryData::Video { video } => {
+			EntryData::Video(video) => {
 				let image_size = video.size();
 				if image_size == egui::Vec2::ZERO {
 					ui.centered_and_justified(|ui| {
@@ -888,7 +888,7 @@ impl EguiApp {
 				self.draw_video_controls(ui, input, &video);
 			},
 
-			EntryData::Image { image, .. } => {
+			EntryData::Image(image) => {
 				// TODO: Do this above
 				// Note: If there are no entries, there's no point in pre-loading.
 				//       This can happen when we start sorting and nothing has been
@@ -1167,7 +1167,7 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Ok(Some(EntryData::Video { video })) = cur_entry.data_if_exists() &&
+			let Ok(Some(EntryData::Video(video))) = cur_entry.data_if_exists() &&
 			video.set_offscreen()
 		{
 			video.pause();

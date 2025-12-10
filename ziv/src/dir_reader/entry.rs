@@ -274,8 +274,8 @@ impl Hash for DirEntry {
 /// Entry data
 #[derive(Clone, Debug)]
 pub enum EntryData {
-	Image { image: EntryImage },
-	Video { video: EntryVideo },
+	Image(EntryImage),
+	Video(EntryVideo),
 }
 
 fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
@@ -289,9 +289,8 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&
 		COMMON_VIDEO_FORMATS.contains(&ext)
 	{
-		return Ok(EntryData::Video {
-			video: EntryVideo::new(egui_ctx, path).context("Unable to create video")?,
-		});
+		let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
+		return Ok(EntryData::Video(video));
 	}
 
 	// If we got a format just from the path, return it
@@ -299,9 +298,8 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 	if let Some(ext) = path.extension() &&
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
-		return Ok(EntryData::Image {
-			image: EntryImage::new(egui_ctx, path, format).context("Unable to create image")?,
-		});
+		let image = EntryImage::new(egui_ctx, path, format).context("Unable to create image")?;
+		return Ok(EntryData::Image(image));
 	}
 
 	// Otherwise, try to guess it by opening it with `image`
@@ -310,9 +308,8 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 		.with_guessed_format()
 		.context("Unable to read file")?;
 	if let Some(format) = reader.format() {
-		return Ok(EntryData::Image {
-			image: EntryImage::new(egui_ctx, path, format).context("Unable to create image")?,
-		});
+		let image = EntryImage::new(egui_ctx, path, format).context("Unable to create image")?;
+		return Ok(EntryData::Image(image));
 	}
 
 	// Then finally, try to guess it with `ffmpeg`.
@@ -325,9 +322,8 @@ fn load_entry_data(path: &Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryDa
 	if let Ok(input) = ffmpeg_next::format::input(path) &&
 		!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
 	{
-		return Ok(EntryData::Video {
-			video: EntryVideo::new(egui_ctx, path).context("Unable to create video")?,
-		});
+		let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
+		return Ok(EntryData::Video(video));
 	}
 
 	app_error::bail!("Unable to guess image kind");
