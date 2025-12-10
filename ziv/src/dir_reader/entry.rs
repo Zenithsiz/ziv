@@ -59,24 +59,33 @@ impl DirEntry {
 			thumbnail_texture: Loadable::new(),
 		})))
 	}
+}
 
+/// Path
+impl DirEntry {
 	/// Returns this entry's path
 	pub fn path(&self) -> Arc<Path> {
 		Arc::clone(&self.0.lock().path)
-	}
-
-	/// Returns this entry's file name
-	pub fn file_name(&self) -> Result<OsString, AppError> {
-		// TODO: Avoid having to clone the file name
-		let path = self.path();
-		path.file_name().context("Missing file name").map(OsStr::to_owned)
 	}
 
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
 		self.0.lock().path = path.into();
 	}
+}
 
+/// File name
+impl DirEntry {
+	/// Returns this entry's file name
+	pub fn file_name(&self) -> Result<OsString, AppError> {
+		// TODO: Avoid having to clone the file name
+		let path = self.path();
+		path.file_name().context("Missing file name").map(OsStr::to_owned)
+	}
+}
+
+/// Metadata
+impl DirEntry {
 	/// Gets the metadata, blocking
 	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
 		self.0
@@ -104,7 +113,10 @@ impl DirEntry {
 	pub(super) fn set_metadata(&self, metadata: fs::Metadata) {
 		self.0.lock().metadata.set(Arc::new(metadata));
 	}
+}
 
+/// Data
+impl DirEntry {
 	/// Gets the entry's data, blocking
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
 		self.0
@@ -146,7 +158,10 @@ impl DirEntry {
 	pub fn remove_data(&self) {
 		self.0.lock().data.remove();
 	}
+}
 
+/// Modified date
+impl DirEntry {
 	/// Gets the modified date, blocking
 	fn modified_date_blocking(&self) -> Result<SystemTime, AppError> {
 		self.0
@@ -159,7 +174,10 @@ impl DirEntry {
 			.copied()
 			.cloned_err_mut()
 	}
+}
 
+/// Size
+impl DirEntry {
 	/// Gets the size, blocking
 	fn size_blocking(&self) -> Result<u64, AppError> {
 		let metadata = self.metadata_blocking()?;
@@ -174,7 +192,10 @@ impl DirEntry {
 
 		Ok(Some(metadata.len()))
 	}
+}
 
+/// Thumbnail
+impl DirEntry {
 	/// Returns this image's thumbnail texture
 	pub fn thumbnail_texture(
 		&self,
@@ -193,7 +214,10 @@ impl DirEntry {
 			.map(OptionClonedMut::cloned_mut)
 			.cloned_err_mut()
 	}
+}
 
+/// Misc.
+impl DirEntry {
 	/// Compares two directory entries according to a sort order
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Result<Ordering, AppError> {
 		let cmp = match order.kind {
