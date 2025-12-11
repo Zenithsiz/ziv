@@ -715,49 +715,70 @@ impl EguiApp {
 		let image_response = ui.allocate_rect(ui_rect, egui::Sense::all());
 		image.uv(uv_rect).paint_at(ui, ui_rect);
 
-		// When dragging or scrolling, handle panning
-		// Note: `translation_delta` uses both scrolling and pan gestures (on mobile, which don't include dragging,
-		//       for some reason, which is why we add it separately)
-		let drag_delta = image_response.drag_delta() +
-			ui.input(egui::InputState::translation_delta) * controls.scroll_sensitivity +
-			egui::vec2(0.0, vertical_pan) * window_size * controls.keyboard_pan_sensitivity;
-		if drag_delta != egui::Vec2::ZERO {
-			pan_zoom.offset -= drag_delta * zoom_scale * image_size / ui_size;
-		}
 
-		// When hovering (either the image or background), handle zooming
-		// TODO: Support 2d zoom?
-		let scroll_delta = ui.input(egui::InputState::zoom_delta);
-		#[expect(
-			clippy::float_cmp,
-			reason = "Egui sets it to exactly `1.0`, and either way this is just an optimization to avoid \
-			          re-calculating the zoom every frame"
-		)]
-		if scroll_delta != 1.0 &&
-			let Some(cursor_pos) = window_response.union(image_response.clone()).hover_pos()
-		{
-			pan_zoom.zoom += (scroll_delta - 1.0) * controls.zoom_sensitivity;
+		if window_response.hovered() || image_response.hovered() {
+			// When dragging or scrolling, handle panning
+			// Note: Dragging must be done with the primary button, otherwise it's zooming.
+			// Note: `translation_delta` uses both scrolling and pan gestures (on mobile, which don't include dragging,
+			//       for some reason, which is why we add it separately)
+			let drag_delta_pointer = match ui.input(|input| input.pointer.primary_down()) {
+				true => ui.input(|input| input.pointer.delta()),
+				false => egui::vec2(0.0, 0.0),
+			};
+			let drag_delta = drag_delta_pointer +
+				ui.input(egui::InputState::translation_delta) * controls.scroll_sensitivity +
+				egui::vec2(0.0, vertical_pan) * window_size * controls.keyboard_pan_sensitivity;
+			if drag_delta != egui::Vec2::ZERO {
+				pan_zoom.offset -= drag_delta * zoom_scale * image_size / ui_size;
+			}
 
-			// Cap our zoom to not view outside the window
-			let max_zoom_scale = egui::Vec2::ONE / window_ui_scale;
-			let min_zoom = scale_to_zoom(max_zoom_scale.min_elem());
-			pan_zoom.zoom = pan_zoom.zoom.max(min_zoom);
+			// When hovering (either the image or background), handle zooming
+			// TODO: Support 2d zoom?
+			let (zoom_delta, cursor_pos) = ui.input(|input| {
+				// Right-click zoom
+				// Note: When zooming like this, we want the cursor position to be
+				//       at the origin of the drag, not it's current
+				let (drag_delta, cursor_pos) = match input.pointer.secondary_down() {
+					true => (-input.pointer.delta().y, input.pointer.press_origin()),
+					false => (0.0, None),
+				};
 
-			// Then update the zoom scale and uv
-			let old_zoom_scale = zoom_scale;
-			zoom_scale = zoom_to_scale(pan_zoom.zoom);
-			uv_scale = (window_size / ui_size)
-				.min(egui::Vec2::ONE / zoom_scale)
-				.max(egui::Vec2::ONE);
+				// Scrolling zoom
+				let scroll_delta = input.zoom_delta() - 1.0;
+				let zoom_delta = scroll_delta * controls.zoom_sensitivity;
 
-			// Note: When zooming in with modes other than fit-window, we'll
-			//       actually zoom into the middle of the image itself, so
-			//       we need to adjust it so we zoom correctly.
-			//       We also adjust the zoom so it zooms into where the cursor
-			//       is on screen for all view modes.
-			pan_zoom.offset += image_size *
-				(old_zoom_scale - zoom_scale) *
-				((window_ui_scale - egui::Vec2::ONE) / 2.0 + (cursor_pos.to_vec2() - window_size / 2.0) / ui_size);
+				// If we still don't have a cursor position, just use the hover position, if any
+				let cursor_pos = cursor_pos.or_else(|| input.pointer.hover_pos());
+
+				(zoom_delta + drag_delta, cursor_pos)
+			});
+			if zoom_delta != 0.0 &&
+				let Some(cursor_pos) = cursor_pos
+			{
+				pan_zoom.zoom += zoom_delta;
+
+				// Cap our zoom to not view outside the window
+				let max_zoom_scale = egui::Vec2::ONE / window_ui_scale;
+				let min_zoom = scale_to_zoom(max_zoom_scale.min_elem());
+				pan_zoom.zoom = pan_zoom.zoom.max(min_zoom);
+
+				// Then update the zoom scale and uv
+				let old_zoom_scale = zoom_scale;
+				zoom_scale = zoom_to_scale(pan_zoom.zoom);
+				uv_scale = (window_size / ui_size)
+					.min(egui::Vec2::ONE / zoom_scale)
+					.max(egui::Vec2::ONE);
+
+				// Note: When zooming in with modes other than fit-window, we'll
+				//       actually zoom into the middle of the image itself, so
+				//       we need to adjust it so we zoom correctly.
+				//       We also adjust the zoom so it zooms into where the cursor
+				//       is on screen for all view modes.
+				pan_zoom.offset += image_size *
+					(old_zoom_scale - zoom_scale) *
+					((window_ui_scale - egui::Vec2::ONE) / 2.0 +
+						(cursor_pos.to_vec2() - window_size / 2.0) / ui_size);
+			}
 		}
 
 		// These minimum/maximum positions were calculated by setting `uv_rect.min >= 0.0` and
