@@ -18,6 +18,7 @@ use {
 		ops::{FromResidual, Try},
 		time::Duration,
 	},
+	image::DynamicImage,
 	serde::{Serialize, de::DeserializeOwned},
 	std::{
 		collections::{BTreeMap, HashMap},
@@ -25,6 +26,7 @@ use {
 		io,
 		ops::ControlFlow,
 		path::Path,
+		sync::Arc,
 		time::Instant,
 	},
 };
@@ -300,5 +302,20 @@ pub struct EguiTextureHandle(pub egui::TextureHandle);
 impl From<&'_ EguiTextureHandle> for egui::load::SizedTexture {
 	fn from(handle: &EguiTextureHandle) -> Self {
 		Self::from_handle(&handle.0)
+	}
+}
+
+#[extend::ext(name = EguiCtxLoadImage)]
+pub impl egui::Context {
+	fn load_image(&self, name: impl Into<String>, image: DynamicImage) -> egui::TextureHandle {
+		let image = egui::ColorImage::from_rgba_unmultiplied(
+			[image.width() as usize, image.height() as usize],
+			&image.into_rgba8().into_flat_samples().samples,
+		);
+		let image = egui::ImageData::Color(Arc::new(image));
+
+		// TODO: This filter should be customizable.
+		let options = egui::TextureOptions::LINEAR;
+		self.load_texture(name, image, options)
 	}
 }

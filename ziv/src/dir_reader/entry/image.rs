@@ -2,7 +2,14 @@
 
 // Imports
 use {
-	crate::util::{AppError, EguiTextureHandle, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	crate::util::{
+		AppError,
+		EguiCtxLoadImage,
+		EguiTextureHandle,
+		Loadable,
+		PriorityThreadPool,
+		priority_thread_pool::Priority,
+	},
 	app_error::Context,
 	image::{DynamicImage, ImageFormat, ImageReader},
 	std::{path::Path, sync::Arc},
@@ -36,16 +43,7 @@ impl EntryImage {
 
 	/// Creates a loaded entry image
 	pub fn loaded(path: Arc<Path>, format: ImageFormat, egui_ctx: &egui::Context, image: DynamicImage) -> Self {
-		let image = egui::ColorImage::from_rgba_unmultiplied(
-			[image.width() as usize, image.height() as usize],
-			&image.into_rgba8().into_flat_samples().samples,
-		);
-		let image = egui::ImageData::Color(Arc::new(image));
-
-		// TODO: This filter should be customizable.
-		let options = egui::TextureOptions::LINEAR;
-		let handle = egui_ctx.load_texture(path.display().to_string(), image, options);
-
+		let handle = egui_ctx.load_image(path.display().to_string(), image);
 		Self {
 			inner: Arc::new(Inner {
 				path,
@@ -82,16 +80,7 @@ impl EntryImage {
 				);
 			}
 
-			let image = egui::ColorImage::from_rgba_unmultiplied(
-				[image.width() as usize, image.height() as usize],
-				&image.into_rgba8().into_flat_samples().samples,
-			);
-			let image = egui::ImageData::Color(Arc::new(image));
-
-			// TODO: This filter should be customizable.
-			let options = egui::TextureOptions::LINEAR;
-			let handle = egui_ctx.load_texture(path.display().to_string(), image, options);
-
+			let handle = egui_ctx.load_image(path.display().to_string(), image);
 			Ok(EguiTextureHandle(handle))
 		})?;
 
