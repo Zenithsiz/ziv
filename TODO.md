@@ -11,3 +11,5 @@
 - Option to load all the image kinds in the background
 
 - Getting an error from an entry should somehow automatically remove it from the list
+
+- When removing entries, the current entry's index doesn't get updated
