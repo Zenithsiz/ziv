@@ -43,11 +43,11 @@ impl EntryImage {
 
 	/// Creates a loaded entry image
 	pub fn loaded(path: Arc<Path>, format: ImageFormat, egui_ctx: &egui::Context, image: DynamicImage) -> Self {
-		let handle = egui_ctx.load_image(path.display().to_string(), image);
+		let handle = Self::create_texture(&path, image, egui_ctx);
 		Self {
 			inner: Arc::new(Inner {
 				path,
-				handle: Loadable::loaded(EguiTextureHandle(handle)),
+				handle: Loadable::loaded(handle),
 				format,
 			}),
 		}
@@ -56,35 +56,39 @@ impl EntryImage {
 	/// Starts loading this image, if unloaded
 	pub fn load(&self, thread_pool: &PriorityThreadPool, egui_ctx: &egui::Context) -> Result<(), AppError> {
 		#[cloned(path = self.inner.path, format = self.inner.format, egui_ctx;)]
-		self.inner.handle.try_load(thread_pool, Priority::HIGH, move || {
-			let mut image = self::open_with_format(&path, format)?;
-
-			// Resize the image if it's too big for the gpu
-			// Note: If the max texture size doesn't fit into a `u32`, then we can be sure
-			//       that any image passed will fit.
-			// TODO: Instead of decreasing the image size, can we just split into multiple images?
-			let max_texture_size = egui_ctx.input(|input| input.max_texture_side);
-			if let Ok(max_texture_size) = u32::try_from(max_texture_size) &&
-				(image.width() > max_texture_size || image.height() > max_texture_size)
-			{
-				tracing::warn!(
-					"Image size {}x{} did not fit into gpu's max texture size, resizing to fit \
-					 {max_texture_size}x{max_texture_size}",
-					image.width(),
-					image.height()
-				);
-				image = image.resize(
-					max_texture_size,
-					max_texture_size,
-					image::imageops::FilterType::Triangle,
-				);
-			}
-
-			let handle = egui_ctx.load_image(path.display().to_string(), image);
-			Ok(EguiTextureHandle(handle))
+		self.inner.handle.try_load(thread_pool, Priority::HIGH, move || try {
+			let image = self::open_with_format(&path, format)?;
+			Self::create_texture(&path, image, &egui_ctx)
 		})?;
 
 		Ok(())
+	}
+
+	/// Creates the image's texture
+	fn create_texture(path: &Path, mut image: DynamicImage, egui_ctx: &egui::Context) -> EguiTextureHandle {
+		// Resize the image if it's too big for the gpu
+		// Note: If the max texture size doesn't fit into a `u32`, then we can be sure
+		//       that any image passed will fit.
+		// TODO: Instead of decreasing the image size, can we just split into multiple images?
+		let max_texture_size = egui_ctx.input(|input| input.max_texture_side);
+		if let Ok(max_texture_size) = u32::try_from(max_texture_size) &&
+			(image.width() > max_texture_size || image.height() > max_texture_size)
+		{
+			tracing::warn!(
+				"Image size {}x{} did not fit into gpu's max texture size, resizing to fit \
+				 {max_texture_size}x{max_texture_size}",
+				image.width(),
+				image.height()
+			);
+			image = image.resize(
+				max_texture_size,
+				max_texture_size,
+				image::imageops::FilterType::Triangle,
+			);
+		}
+
+		let handle = egui_ctx.load_image(path.display().to_string(), image);
+		EguiTextureHandle(handle)
 	}
 
 	/// Unloads this image
