@@ -84,6 +84,19 @@ impl Entries {
 		}
 	}
 
+	pub const fn sort_order(&self) -> SortOrder {
+		let kind = match self.inner {
+			Inner::FileName(_) => SortOrderKind::FileName,
+			Inner::ModificationDate(_) => SortOrderKind::ModificationDate,
+			Inner::Size(_) => SortOrderKind::Size,
+		};
+
+		SortOrder {
+			reverse: self.reverse,
+			kind,
+		}
+	}
+
 	pub const fn set_reverse(&mut self, reverse: bool) {
 		self.reverse = reverse;
 	}

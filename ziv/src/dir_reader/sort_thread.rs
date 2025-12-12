@@ -52,10 +52,8 @@ impl SortThread {
 	/// Sets the sort order and takes all entries from the list.
 	fn take_entries(&mut self, sort_order: SortOrder) -> Vec<DirEntry> {
 		let mut inner = self.inner.lock();
-		let prev_sort_order = inner.sort_order;
-		inner.sort_order = sort_order;
 
-		match prev_sort_order.kind == sort_order.kind {
+		match inner.entries.sort_order().kind == sort_order.kind {
 			// If we're just reversing the entries, set it on the entries and
 			// then just sort any orphaned entries from a previous sort attempt.
 			// Note: We can't just insert these entries, because they might not

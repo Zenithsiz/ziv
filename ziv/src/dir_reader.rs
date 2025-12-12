@@ -66,16 +66,16 @@ pub struct DirReader {
 impl DirReader {
 	/// Creates a new directory reader
 	pub fn new(path: PathBuf) -> Result<Self, AppError> {
+		// TODO: This needs to be configurable.
 		let sort_order = SortOrder {
 			reverse: false,
 			kind:    SortOrderKind::FileName,
 		};
 		let inner = Arc::new(Mutex::new(Inner {
-			sort_order,
-			entries: Entries::new(sort_order),
+			entries:       Entries::new(sort_order),
 			sort_progress: None,
-			cur_entry: None,
-			visitor: None,
+			cur_entry:     None,
+			visitor:       None,
 		}));
 
 		#[cloned(inner)]
@@ -115,7 +115,7 @@ impl DirReader {
 
 	/// Gets the sort order
 	pub fn sort_order(&self) -> SortOrder {
-		self.inner.lock().sort_order
+		self.inner.lock().entries.sort_order()
 	}
 
 	/// Returns whether a sorting is currently happening, as well as progress
@@ -381,8 +381,6 @@ impl DirReader {
 struct Inner {
 	entries: Entries,
 
-	// TODO: Remove sort order and just get it from the entries?
-	sort_order:    SortOrder,
 	sort_progress: Option<SortProgress>,
 
 	cur_entry: Option<CurEntry>,
@@ -408,7 +406,7 @@ impl Inner {
 
 			// If it has an index, or isn't loaded for the current sort order,
 			// there's nothing we can do without blocking, so quit
-			if cur_entry.idx.is_some() || !cur_entry.entry.is_loaded_for_order(self.sort_order) {
+			if cur_entry.idx.is_some() || !cur_entry.entry.is_loaded_for_order(self.entries.sort_order()) {
 				break cur_entry;
 			}
 
@@ -591,9 +589,9 @@ impl Inner {
 	/// Loads an entry for the current sort order
 	pub fn load(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<(), AppError> {
 		loop {
-			let sort_order = self.sort_order;
+			let sort_order = self.entries.sort_order();
 			MutexGuard::unlocked(self, || entry.load_for_order(sort_order))?;
-			if self.sort_order == sort_order {
+			if self.entries.sort_order() == sort_order {
 				break;
 			}
 		}
