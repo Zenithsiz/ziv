@@ -92,15 +92,19 @@ pub fn video_thumbnail(path: &Path) -> Result<DynamicImage, AppError> {
 	let mut decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
 
 	// And a scaler
-	let input_size = [decoder.width(), decoder.height()];
-	let output_size = match input_size[0] > input_size[1] {
-		true => [256, 256 * input_size[1] / input_size[0]],
-		false => [256 * input_size[0] / input_size[1], 256],
+	let [input_width, input_height] = [decoder.width(), decoder.height()];
+	app_error::ensure!(
+		input_width != 0 && input_height != 0,
+		"Video size was 0: {input_width}x{input_height}"
+	);
+	let output_size = match input_width > input_height {
+		true => [256, 256 * input_height / input_width],
+		false => [256 * input_width / input_height, 256],
 	};
 	let mut scaler = ffmpeg_next::software::scaling::context::Context::get(
 		decoder.format(),
-		input_size[0],
-		input_size[1],
+		input_width,
+		input_height,
 		ffmpeg_next::format::Pixel::RGBA,
 		output_size[0],
 		output_size[1],
