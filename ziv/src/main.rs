@@ -47,11 +47,11 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{EntryData, EntryThumbnail, video::PlayingStatus},
+			entry::{EntryData, EntryThumbnail, image::EntryImageTexture, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
-		util::{AppError, EguiTextureHandle, PriorityThreadPool, RectUtils},
+		util::{AppError, PriorityThreadPool, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -402,9 +402,9 @@ impl EguiApp {
 		if let Ok(Some(data)) = cur_entry.data_if_exists() {
 			match data {
 				EntryData::Image(image) => {
-					if let Ok(Some(handle)) = image.handle() {
-						let size = handle.size_vec2();
-						write_str!(title, " {}x{}", size.x, size.y);
+					if let Ok(Some(texture)) = image.texture() {
+						let [width, height] = texture.size();
+						write_str!(title, " {width}x{height}");
 					}
 					let format = image.format();
 					write_str!(title, " ({format:?})");
@@ -605,7 +605,8 @@ impl EguiApp {
 	#[expect(clippy::too_many_arguments, reason = "TODO: Bundle them up in a single type")]
 	fn draw_image(
 		ui: &mut egui::Ui,
-		image: egui::Image,
+		// TODO: Pass parameters as a separate type to avoid confusing both rects.
+		draw_image: impl FnOnce(&mut egui::Ui, egui::Rect, egui::Rect),
 		image_size: egui::Vec2,
 		pan_zoom: &mut PanZoom,
 		view_mode: ViewMode,
@@ -713,7 +714,7 @@ impl EguiApp {
 			.scale_from_min2(window_ui_scale);
 
 		let image_response = ui.allocate_rect(ui_rect, egui::Sense::all());
-		image.uv(uv_rect).paint_at(ui, ui_rect);
+		draw_image(ui, ui_rect, uv_rect);
 
 
 		if window_response.hovered() || image_response.hovered() {
@@ -988,11 +989,14 @@ impl EguiApp {
 					}
 				}
 
-				let image = egui::Image::from_texture(&video.handle()).sense(egui::Sense::click());
+				let handle = video.handle();
+				let draw_image = |ui: &mut egui::Ui, ui_rect: egui::Rect, uv_rect: egui::Rect| {
+					egui::Image::new(&handle).uv(uv_rect).paint_at(ui, ui_rect);
+				};
 
 				output.image_response = Some(Self::draw_image(
 					ui,
-					image,
+					draw_image,
 					image_size,
 					&mut self.pan_zoom,
 					self.view_mode,
@@ -1004,9 +1008,9 @@ impl EguiApp {
 			},
 
 			EntryData::Image(image) => {
-				let Some(handle) = self.try_with_entry(input.entry, |this, _| {
+				let Some(texture) = self.try_with_entry(input.entry, |this, _| {
 					image.load(&this.thread_pool, ui.ctx())?;
-					image.handle()
+					image.texture()
 				}) else {
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
@@ -1014,8 +1018,10 @@ impl EguiApp {
 					return output;
 				};
 
-				let image_size = handle.size_vec2();
-				let image = egui::Image::from_texture(&handle).sense(egui::Sense::click());
+				let image_size = texture.size_vec2();
+				let draw_image = |ui: &mut egui::Ui, ui_rect: egui::Rect, uv_rect: egui::Rect| {
+					texture.paint_at(ui, uv_rect, ui_rect);
+				};
 
 				// Note: If we're in fullscreen, we shouldn't resize yet.
 				//       If we did, the user might notice a flicker, because
@@ -1029,7 +1035,7 @@ impl EguiApp {
 
 				output.image_response = Some(Self::draw_image(
 					ui,
-					image,
+					draw_image,
 					image_size,
 					&mut self.pan_zoom,
 					self.view_mode,
@@ -1326,7 +1332,7 @@ impl EguiApp {
 
 										ui.vertical_centered_justified(|ui| {
 											enum Thumbnail {
-												Image(EguiTextureHandle),
+												Image(EntryImageTexture),
 												NonMedia,
 											}
 											let thumbnail = self.try_with_entry(&entry, |this, entry| try {
@@ -1341,26 +1347,35 @@ impl EguiApp {
 
 												match thumbnail {
 													EntryThumbnail::Image(image) =>
-														image.handle()?.map(Thumbnail::Image),
+														image.texture()?.map(Thumbnail::Image),
 													EntryThumbnail::NonMedia => Some(Thumbnail::NonMedia),
 												}
 											});
 
-											let response = match thumbnail {
-												Some(Thumbnail::Image(handle)) => {
-													let image = egui::Image::from_texture(&handle)
-														.fit_to_exact_size(image_size)
-														.show_loading_spinner(false)
-														.sense(egui::Sense::click());
+											match thumbnail {
+												// TODO: Not have to manually paint the texture?
+												Some(Thumbnail::Image(texture)) => {
+													let texture_size = texture.size_vec2();
+													let aspect_ratio = match texture_size.y > texture_size.x {
+														true => egui::vec2(texture_size.x / texture_size.y, 1.0),
+														false => egui::vec2(1.0, texture_size.y / texture_size.x),
+													};
 
-													ui.add(image)
+													let uv_rect =
+														egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE);
+
+													// TODO: Why is the next widget position offset?
+													let ui_pos =
+														ui.next_widget_position() + egui::vec2(0.0, image_size.y / 2.0);
+													let ui_rect =
+														egui::Rect::from_center_size(ui_pos, image_size * aspect_ratio);
+
+													texture.paint_at(ui, uv_rect, ui_rect);
 												},
-												Some(Thumbnail::NonMedia) => {
-													self.remove_entry(&entry);
-													return;
-												},
-												None => ui.allocate_response(image_size, egui::Sense::click()),
-											};
+												Some(Thumbnail::NonMedia) => self.remove_entry(&entry),
+												None => (),
+											}
+											let response = ui.allocate_response(image_size, egui::Sense::click());
 
 											if response.double_clicked() {
 												goto_entry = Some(entry.clone());
