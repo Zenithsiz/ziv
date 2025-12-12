@@ -5,6 +5,7 @@
 // Modules
 pub mod entries;
 pub mod entry;
+mod read_thread;
 pub mod sort_order;
 mod sort_thread;
 
@@ -17,13 +18,10 @@ pub use self::{
 
 // Imports
 use {
-	self::sort_thread::SortThread,
+	self::{read_thread::ReadThread, sort_thread::SortThread},
 	crate::util::AppError,
 	app_error::Context,
-	core::{
-		ops::{Bound, IntoBounds},
-		time::Duration,
-	},
+	core::ops::{Bound, IntoBounds},
 	parking_lot::{Mutex, MutexGuard},
 	std::{
 		iter,
@@ -82,10 +80,11 @@ impl DirReader {
 		let read_thread = thread::Builder::new()
 			.name("read".to_owned())
 			.spawn(move || {
-				if let Err(err) = Self::read(&inner, &path) {
-					tracing::error!("Unable to read directory {path:?}: {err:?}");
+				let read_thread = ReadThread::new(inner);
+				match read_thread.run(&path) {
+					Ok(()) => tracing::debug!("Reader thread finished"),
+					Err(err) => tracing::error!("Reader thread returned an error reading {path:?}: {err:?}"),
 				}
-				tracing::debug!("Reader thread finished");
 			})
 			.context("Unable to spawn read thread")?;
 
@@ -242,138 +241,6 @@ impl DirReader {
 	/// Returns the index of an entry.
 	pub fn idx_of(&self, entry: &DirEntry) -> Result<usize, AppError> {
 		self.inner.lock().search(entry)
-	}
-
-	/// Reads a path into this directory reader.
-	///
-	/// Directories will be read, while files will have their parent read
-	///
-	/// # Errors
-	/// If unable to read the directory or any of the entries, returns `Err`.
-	///
-	/// If processing the entries results in an error, logs it and continues
-	fn read(inner: &Arc<Mutex<Inner>>, mut path: &Path) -> Result<(), AppError> {
-		let path_metadata = path.metadata().context("Unable to get path metadata")?;
-
-		let mut begin_entry = None;
-		if !path_metadata.is_dir() {
-			let begin_entry_path = path.to_owned();
-
-			// Note: If `path` is just a filename, then it's parent will be empty,
-			//       but walkdir doesn't like empty paths, so we replace them with `.`.
-			path = path.parent().context("Path had no parent")?;
-			if path.is_empty() {
-				path = Path::new(".");
-			}
-
-			let entry = Self::read_path(inner, &begin_entry_path)
-				.context("Unable to read path")?
-				.context("Specified path was not an image")?;
-			entry.set_metadata(path_metadata);
-			let entry = begin_entry.insert(entry);
-			inner.lock().cur_entry = Some(CurEntry {
-				entry: entry.clone(),
-				idx:   None,
-			});
-		}
-
-		// Before reading it, start a watcher
-		// Note: We do it *before* reading to ensure we don't miss any new files
-		//       added during the traversal later on.
-		#[cloned(inner)]
-		let event_handler = move |result: notify_debouncer_full::DebounceEventResult| match result {
-			Ok(events) =>
-				for notify_debouncer_full::DebouncedEvent { event, .. } in events {
-					tracing::trace!("Received watch event: {event:?}");
-					match event.kind {
-						notify::EventKind::Create(_) =>
-							for path in event.paths {
-								if let Err(err) = Self::read_path(&inner, &path) {
-									tracing::warn!("Unable to read path {path:?}: {err:?}");
-								}
-							},
-
-						notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::Both)) => {
-							let mut paths = event.paths.into_iter().array_chunks();
-							for [from_path, to_path] in &mut paths {
-								inner.lock().rename(&from_path, to_path);
-							}
-
-							if let Some(remaining) = paths.into_remainder() &&
-								!remaining.is_empty()
-							{
-								tracing::warn!(
-									"Ignoring remaining paths in rename event: {:?}",
-									remaining.collect::<Vec<_>>()
-								);
-							}
-						},
-
-						// TODO: `Remove` events don't seem to be emitted, just `Modify(Name(From))`,
-						//       so we also remove when that happens
-						notify::EventKind::Remove(_) |
-						notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::From)) =>
-							for path in event.paths {
-								let res = inner.lock().remove_by_path(&path);
-								if let Err(err) = res {
-									tracing::warn!("Unable to remove entry {path:?}: {err:?}");
-								}
-							},
-						_ => tracing::trace!("Ignoring watch event"),
-					}
-				},
-			Err(errors) =>
-				for err in errors {
-					tracing::warn!("Received a filesystem error while watching: {:?}", AppError::new(&err));
-				},
-		};
-
-		let mut debouncer = notify_debouncer_full::new_debouncer(Duration::from_secs(1), None, event_handler)
-			.context("Unable to create watch debouncer")?;
-		debouncer
-			.watch(path, notify::RecursiveMode::NonRecursive)
-			.context("Unable to watch directory")?;
-
-		let scan_dir = walkdir::WalkDir::new(path).min_depth(1).max_depth(1);
-		for entry in scan_dir {
-			let entry = entry.context("Unable to read entry")?;
-			let entry_path = entry.path();
-
-			// Skip if we're already added this one
-			if let Some(begin_entry) = &begin_entry &&
-				&*begin_entry.path() == entry_path
-			{
-				continue;
-			}
-
-			if let Err(err) = Self::read_dir_entry(inner, entry_path) {
-				tracing::warn!("Unable to read directory entry {entry_path:?}: {err:?}");
-			}
-		}
-
-		// TODO: Once we implement re-reading directories, replace this with a loop over
-		//       some channel.
-		// Note: For now this is necessary to ensure we don't drop the directory watcher,
-		//       which would stop watching
-		loop {
-			std::thread::park();
-		}
-	}
-
-	fn read_dir_entry(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
-		Self::read_path_with_file_type(inner, path)
-	}
-
-	fn read_path(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
-		Self::read_path_with_file_type(inner, path)
-	}
-
-	fn read_path_with_file_type(inner: &Arc<Mutex<Inner>>, path: &Path) -> Result<Option<DirEntry>, AppError> {
-		// Create the entry and insert it
-		let entry = DirEntry::new(path.to_owned());
-		inner.lock().insert(&entry)?;
-
-		Ok(Some(entry))
 	}
 }
 
