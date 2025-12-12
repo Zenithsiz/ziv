@@ -25,7 +25,8 @@
 	string_replace_in_place,
 	formatting_options,
 	if_let_guard,
-	try_trait_v2_yeet
+	try_trait_v2_yeet,
+	vec_peek_mut
 )]
 
 // Modules
@@ -71,7 +72,8 @@ use {
 		fs,
 		path::{Path, PathBuf},
 		process::ExitCode,
-		sync::Arc,
+		sync::{Arc, mpsc},
+		vec,
 	},
 	strum::VariantArray,
 	zutil_logger::Logger,
@@ -170,6 +172,8 @@ struct Controls {
 	keyboard_pan_smooth:      f32,
 }
 
+// TODO: This is a big mess, we need to organize it better
+//       and rename things to not be as confusing.
 #[derive(Debug)]
 struct EguiApp {
 	config_path:              PathBuf,
@@ -198,6 +202,9 @@ struct EguiApp {
 	// TODO: We need a better solution than this
 	loaded_entries: IndexSet<DirEntry>,
 	max_loaded_entries: usize,
+
+	new_entry_rx:    mpsc::Receiver<DirEntry>,
+	loading_entries: Vec<DirEntry>,
 }
 
 impl EguiApp {
@@ -211,8 +218,10 @@ impl EguiApp {
 		path: PathBuf,
 	) -> Result<Self, AppError> {
 		let dir_reader = DirReader::new(path).context("Unable to create directory reader")?;
+		let (new_entry_tx, new_entry_rx) = mpsc::channel();
 		dir_reader.set_visitor(DirReaderVisitor {
-			ctx: cc.egui_ctx.clone(),
+			entry_tx: new_entry_tx,
+			ctx:      cc.egui_ctx.clone(),
 		});
 
 		// Create and canonicalize the thumbnail path
@@ -261,6 +270,8 @@ impl EguiApp {
 			settings_waiting_for_key: None,
 			prev_valid_entry: None,
 			entries_per_row: 4,
+			new_entry_rx,
+			loading_entries: vec![],
 		})
 	}
 
@@ -1428,6 +1439,37 @@ impl EguiApp {
 
 impl eframe::App for EguiApp {
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+		// Receive and try to load any new entries
+		// TODO: This should be configurable because it can do IO
+		// Note: To be more efficient, we use `swap_remove` when removing entries
+		//       here, which means we don't have a good way to iterate over all
+		//       entries aside from manually by indexing.
+		self.loading_entries.extend(self.new_entry_rx.try_iter());
+		for loading_entry_idx in 0..self.loading_entries.len() {
+			let Some(entry) = self.loading_entries.get(loading_entry_idx) else {
+				break;
+			};
+
+			match entry.try_data(&self.thread_pool, ctx) {
+				// If we successfully loaded it, remove it from loading,
+				// and remove it from the list if it's non-media.
+				Ok(Some(data)) => {
+					let entry = self.loading_entries.swap_remove(loading_entry_idx);
+					if matches!(data, EntryData::Other) {
+						self.remove_entry(&entry);
+					}
+				},
+				// If unloaded, go next
+				Ok(None) => (),
+				// If it errored, remove it from both loading and the list.
+				Err(err) => {
+					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
+					let entry = self.loading_entries.swap_remove(loading_entry_idx);
+					self.remove_entry(&entry);
+				},
+			}
+		}
+
 		// For the first 2 frames don't draw anything, because resizes and other
 		// window-related things don't work yet
 		self.next_frame_idx += 1;
@@ -1509,11 +1551,13 @@ fn sort_order_name(sort_order: SortOrder) -> String {
 }
 
 struct DirReaderVisitor {
-	ctx: egui::Context,
+	entry_tx: mpsc::Sender<DirEntry>,
+	ctx:      egui::Context,
 }
 
 impl dir_reader::Visitor for DirReaderVisitor {
-	fn entry_added(&self, _dir_entry: &DirEntry) {
+	fn entry_added(&self, dir_entry: &DirEntry) {
+		_ = self.entry_tx.send(dir_entry.clone());
 		self.ctx.request_repaint();
 	}
 }
