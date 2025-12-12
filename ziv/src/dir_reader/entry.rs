@@ -28,7 +28,7 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	path: Mutex<Arc<Path>>,
+	source: Mutex<EntrySource>,
 
 	metadata:  Loadable<Arc<Metadata>>,
 	data:      Loadable<EntryData>,
@@ -40,9 +40,9 @@ pub struct DirEntry(Arc<Inner>);
 
 impl DirEntry {
 	/// Creates a new directory entry
-	pub(super) fn new(path: impl Into<Arc<Path>>) -> Self {
+	pub(super) fn new(source: EntrySource) -> Self {
 		Self(Arc::new(Inner {
-			path:      Mutex::new(path.into()),
+			source:    Mutex::new(source),
 			metadata:  Loadable::new(),
 			data:      Loadable::new(),
 			thumbnail: Loadable::new(),
@@ -52,14 +52,14 @@ impl DirEntry {
 
 /// Path
 impl DirEntry {
-	/// Returns this entry's path
-	pub fn path(&self) -> Arc<Path> {
-		Arc::clone(&self.0.path.lock())
+	/// Returns this entry's source
+	pub fn source(&self) -> EntrySource {
+		self.0.source.lock().clone()
 	}
 
 	/// Renames this entry
 	pub fn rename(&self, path: PathBuf) {
-		*self.0.path.lock() = path.into();
+		*self.0.source.lock() = EntrySource::Path(Arc::from(path));
 	}
 }
 
@@ -68,8 +68,10 @@ impl DirEntry {
 	/// Returns this entry's file name
 	pub fn file_name(&self) -> Result<OsString, AppError> {
 		// TODO: Avoid having to clone the file name
-		let path = self.path();
-		path.file_name().context("Missing file name").map(OsStr::to_owned)
+		let source = self.source();
+		match source {
+			EntrySource::Path(path) => path.file_name().context("Missing file name").map(OsStr::to_owned),
+		}
 	}
 }
 
@@ -79,14 +81,14 @@ impl DirEntry {
 	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
 		self.0
 			.metadata
-			.load(|| self::load_metadata(&self.path()).context("Unable to get metadata"))
+			.load(|| self::load_metadata(&self.source()).context("Unable to get metadata"))
 	}
 
 	/// Tries to gets the metadata
 	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<Arc<fs::Metadata>>, AppError> {
 		#[cloned(this = self)]
 		self.0.metadata.try_load(thread_pool, Priority::DEFAULT, move || {
-			self::load_metadata(&this.path()).context("Unable to get metadata")
+			self::load_metadata(&this.source()).context("Unable to get metadata")
 		})
 	}
 
@@ -102,7 +104,7 @@ impl DirEntry {
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
 		self.0
 			.data
-			.load(|| self::load_entry_data(self.path(), egui_ctx).context("Unable to load entry data"))
+			.load(|| self::load_entry_data(self.source(), egui_ctx).context("Unable to load entry data"))
 	}
 
 	/// Returns this entry's data
@@ -113,7 +115,7 @@ impl DirEntry {
 	) -> Result<Option<EntryData>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0.data.try_load(thread_pool, Priority::HIGH, move || {
-			self::load_entry_data(this.path(), &egui_ctx).context("Unable to load entry data")
+			self::load_entry_data(this.source(), &egui_ctx).context("Unable to load entry data")
 		})
 	}
 
@@ -161,9 +163,9 @@ impl DirEntry {
 	) -> Result<Option<EntryThumbnail>, AppError> {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
-			let path = this.path();
+			let source = this.source();
 			let data = this.data_blocking(&egui_ctx).context("Unable to load data")?;
-			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &path, &data).context("Unable to create thumbnail")
+			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data).context("Unable to create thumbnail")
 		})
 	}
 }
@@ -240,6 +242,13 @@ impl Hash for DirEntry {
 	}
 }
 
+/// Entry source
+#[derive(Clone, Debug)]
+pub enum EntrySource {
+	/// Filesystem path
+	Path(Arc<Path>),
+}
+
 /// Entry data
 #[derive(Clone, Debug)]
 pub enum EntryData {
@@ -248,12 +257,17 @@ pub enum EntryData {
 	Other,
 }
 
-fn load_metadata(path: &Path) -> Result<Arc<Metadata>, AppError> {
-	let metadata = fs::metadata(path).context("Unable to get metadata")?;
+fn load_metadata(source: &EntrySource) -> Result<Arc<Metadata>, AppError> {
+	let metadata = match source {
+		EntrySource::Path(path) => fs::metadata(path).context("Unable to get metadata")?,
+	};
+
 	Ok(Arc::new(metadata))
 }
 
-fn load_entry_data(path: Arc<Path>, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
+fn load_entry_data(source: EntrySource, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
+	let EntrySource::Path(path) = source;
+
 	// Test against video file formats before we need to read the file.
 	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
 	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&

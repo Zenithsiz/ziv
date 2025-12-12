@@ -107,7 +107,7 @@ impl SortThread {
 
 				let mut inner = self.inner.lock();
 				if let Err(err) = inner.insert(&entry) {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
+					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source());
 				}
 				inner.sort_progress.as_mut().expect("We just inserted it").sorted += 1;
 			}

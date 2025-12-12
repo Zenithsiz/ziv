@@ -18,7 +18,7 @@ pub use self::{
 
 // Imports
 use {
-	self::{read_thread::ReadThread, sort_thread::SortThread},
+	self::{entry::EntrySource, read_thread::ReadThread, sort_thread::SortThread},
 	crate::util::AppError,
 	app_error::Context,
 	core::ops::{Bound, IntoBounds},
@@ -284,7 +284,7 @@ impl Inner {
 			let idx = match self.search(&cur_entry.entry) {
 				Ok(idx) => idx,
 				Err(err) => {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", cur_entry.path());
+					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", cur_entry.source());
 					self.cur_entry = None;
 					continue;
 				},
@@ -399,7 +399,12 @@ impl Inner {
 	/// Renames an entry
 	pub fn rename(&self, from_path: &Path, to_path: PathBuf) {
 		// TODO: This is `O(N)`
-		let Some(entry) = self.entries.iter().find(|entry| &*entry.path() == from_path) else {
+		let Some(entry) = self.entries.iter().find(|entry| {
+			let EntrySource::Path(entry_path) = entry.source() else {
+				return false;
+			};
+			&*entry_path == from_path
+		}) else {
 			return;
 		};
 
@@ -428,7 +433,17 @@ impl Inner {
 	/// Removes an entry by path
 	pub fn remove_by_path(self: &mut MutexGuard<'_, Self>, path: &Path) -> Result<Option<DirEntry>, AppError> {
 		// TODO: Make finding by path not `O(N)`?
-		let Some(entry) = self.entries.iter().find(|entry| &*entry.path() == path).cloned() else {
+		let Some(entry) = self
+			.entries
+			.iter()
+			.find(|entry| {
+				let EntrySource::Path(entry_path) = entry.source() else {
+					return false;
+				};
+				&*entry_path == path
+			})
+			.cloned()
+		else {
 			return Ok(None);
 		};
 		assert!(self.remove(&entry)?);

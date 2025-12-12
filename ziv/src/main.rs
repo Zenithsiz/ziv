@@ -28,6 +28,11 @@
 	try_trait_v2_yeet,
 	vec_peek_mut
 )]
+// Lints
+#![expect(
+	irrefutable_let_patterns,
+	reason = "Currently only one variant exists, but more will be added soon"
+)]
 
 // Modules
 mod args;
@@ -48,7 +53,7 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{EntryData, EntryThumbnail, image::EntryImageTexture, video::PlayingStatus},
+			entry::{EntryData, EntrySource, EntryThumbnail, image::EntryImageTexture, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -300,7 +305,7 @@ impl EguiApp {
 		//       the list and it failed to be loaded, so either way it's no
 		//       longer on the list and thus we're fine to just log and continue
 		if let Err(err) = self.dir_reader.remove(entry) {
-			tracing::warn!("Unable to remove entry {:?}: {err:?}", entry.path());
+			tracing::warn!("Unable to remove entry {:?}: {err:?}", entry.source());
 		}
 		self.loaded_entries.shift_remove(entry);
 	}
@@ -313,7 +318,7 @@ impl EguiApp {
 		match f(self, entry) {
 			Ok(value) => value,
 			Err(err) => {
-				tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
+				tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source());
 				self.remove_entry(entry);
 				do yeet;
 			},
@@ -408,7 +413,7 @@ impl EguiApp {
 				None => write!(f, "?"),
 			}),
 			self.dir_reader.len(),
-			cur_entry.path().file_name().expect("Entry had no file name").display()
+			cur_entry.file_name().expect("Entry had no file name").display()
 		);
 
 		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_exists()) {
@@ -1139,7 +1144,6 @@ impl EguiApp {
 		}
 
 		let cur_entry = cur_entry;
-		let cur_entry_path = cur_entry.path();
 
 		self.draw_info_window(ctx, Some(&cur_entry));
 
@@ -1165,25 +1169,29 @@ impl EguiApp {
 			// TODO: Should we make this a native viewport?
 			// TODO: These errors should be popups, not logs.
 			egui::Popup::context_menu(&response).show(|ui| {
-				if ui.button("Open").clicked() &&
-					let Err(err) = opener::open(&*cur_entry_path)
-				{
-					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
-				}
+				if let EntrySource::Path(cur_entry_path) = cur_entry.source() {
+					if ui.button("Open").clicked() &&
+						let Err(err) = opener::open(&*cur_entry_path)
+					{
+						tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
+					}
 
-				if ui.button("Open in directory").clicked() &&
-					let Err(err) = opener::reveal(&cur_entry_path)
-				{
-					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
+					if ui.button("Open in directory").clicked() &&
+						let Err(err) = opener::reveal(&cur_entry_path)
+					{
+						tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
+					}
 				}
 
 				ui.separator();
 
-				if ui.button("Copy path").clicked() {
-					// TODO: Not copy a lossy string?
-					ctx.send_cmd(egui::OutputCommand::CopyText(
-						cur_entry.path().to_string_lossy().into_owned(),
-					));
+				if let EntrySource::Path(cur_entry_path) = cur_entry.source() {
+					if ui.button("Copy path").clicked() {
+						// TODO: Not copy a lossy string?
+						ctx.send_cmd(egui::OutputCommand::CopyText(
+							cur_entry_path.to_string_lossy().into_owned(),
+						));
+					}
 				}
 
 				if ui.button("Copy file name").clicked() {
@@ -1463,7 +1471,7 @@ impl eframe::App for EguiApp {
 				Ok(None) => (),
 				// If it errored, remove it from both loading and the list.
 				Err(err) => {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
+					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source());
 					let entry = self.loading_entries.swap_remove(loading_entry_idx);
 					self.remove_entry(&entry);
 				},

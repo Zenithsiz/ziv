@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{CurEntry, DirEntry},
+	super::{CurEntry, DirEntry, entry::EntrySource},
 	crate::util::AppError,
 	app_error::Context,
 	core::time::Duration,
@@ -65,10 +65,7 @@ impl ReadThread {
 		{
 			let mut inner = self.inner.lock();
 			inner.entries.insert(entry.clone());
-			inner.cur_entry = Some(CurEntry {
-				entry: entry.clone(),
-				idx:   None,
-			});
+			inner.cur_entry = Some(CurEntry { entry, idx: None });
 		}
 
 		// Then read the parent
@@ -78,14 +75,14 @@ impl ReadThread {
 		if parent.is_empty() {
 			parent = Path::new(".");
 		}
-		self.read_dir(parent, Some(&entry))
+		self.read_dir(parent, Some(path))
 	}
 
 	/// Reads a directory.
 	///
 	/// If `existing_entry` is `Some` and we find an entry with
 	/// the same path, it will be ignored.
-	fn read_dir(&self, path: &Path, existing_entry: Option<&DirEntry>) -> Result<(), AppError> {
+	fn read_dir(&self, path: &Path, existing_entry: Option<&Path>) -> Result<(), AppError> {
 		// Before reading it, start a watcher
 		// Note: We do it *before* reading to ensure we don't miss any new files
 		//       added during the traversal later on.
@@ -98,7 +95,7 @@ impl ReadThread {
 
 			// Skip if we're already added this one
 			if let Some(existing_entry) = existing_entry &&
-				&*existing_entry.path() == entry_path
+				existing_entry == entry_path
 			{
 				continue;
 			}
@@ -192,7 +189,7 @@ impl ReadThread {
 	/// Reads a path
 	fn read_path(&self, path: &Path) -> Result<DirEntry, AppError> {
 		// Create the entry and insert it
-		let entry = DirEntry::new(path.to_owned());
+		let entry = DirEntry::new(EntrySource::Path(path.into()));
 		self.inner.lock().insert(&entry)?;
 
 		Ok(entry)

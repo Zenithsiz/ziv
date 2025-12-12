@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{EntryData, EntryImage, video},
+	super::{EntryData, EntryImage, EntrySource, video},
 	crate::util::AppError,
 	app_error::{Context, app_error},
 	core::time::Duration,
@@ -24,9 +24,11 @@ impl EntryThumbnail {
 	pub fn new(
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Path,
-		entry_path: &Path,
+		source: &EntrySource,
 		data: &EntryData,
 	) -> Result<Self, AppError> {
+		let EntrySource::Path(entry_path) = source;
+
 		// Note: If the path is inside of the thumbnail cache, just load it to avoid recursively creating
 		//       thumbnails of thumbnails.
 		// TODO: This assumes that `thumbnails_dir` is absolute, which currently is true, but we shouldn't
