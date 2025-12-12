@@ -623,10 +623,13 @@ impl Inner {
 			return Ok(false);
 		}
 
-		if let Some(cur_entry) = &self.cur_entry &&
-			cur_entry.entry == *entry
-		{
-			self.cur_entry = None;
+		if let Some(cur_entry) = &mut self.cur_entry {
+			// TODO: Re-compute the index here?
+			cur_entry.idx = None;
+
+			if cur_entry.entry == *entry {
+				self.cur_entry = None;
+			}
 		}
 
 		Ok(true)
