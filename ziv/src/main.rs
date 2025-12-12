@@ -325,7 +325,8 @@ impl EguiApp {
 		};
 		self.resized_image = false;
 
-		if let Ok(Some(EntryData::Video(video))) = prev_entry.data_if_exists() &&
+		if let Some(EntryData::Video(video)) =
+			self.try_with_entry(prev_entry, |_, prev_entry| prev_entry.data_if_exists()) &&
 			video.set_offscreen()
 		{
 			video.pause();
@@ -399,10 +400,10 @@ impl EguiApp {
 			cur_entry.path().file_name().expect("Entry had no file name").display()
 		);
 
-		if let Ok(Some(data)) = cur_entry.data_if_exists() {
+		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_exists()) {
 			match data {
 				EntryData::Image(image) => {
-					if let Ok(Some(texture)) = image.texture() {
+					if let Some(texture) = self.try_with_entry(cur_entry, |_, _| image.texture()) {
 						let [width, height] = texture.size();
 						write_str!(title, " {width}x{height}");
 					}
@@ -1256,7 +1257,8 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Ok(Some(EntryData::Video(video))) = cur_entry.data_if_exists() &&
+			let Some(EntryData::Video(video)) =
+				self.try_with_entry(&cur_entry, |_, cur_entry| cur_entry.data_if_exists()) &&
 			video.set_offscreen()
 		{
 			video.pause();
