@@ -18,7 +18,7 @@ use {
 	parking_lot::Mutex,
 	std::{
 		ffi::{OsStr, OsString},
-		fs::{self, Metadata},
+		fs,
 		path::{Path, PathBuf},
 		sync::Arc,
 		time::SystemTime,
@@ -30,7 +30,7 @@ use {
 struct Inner {
 	source: Mutex<EntrySource>,
 
-	metadata:  Loadable<Arc<Metadata>>,
+	metadata:  Loadable<EntryMetadata>,
 	data:      Loadable<EntryData>,
 	thumbnail: Loadable<EntryThumbnail>,
 }
@@ -78,14 +78,14 @@ impl DirEntry {
 /// Metadata
 impl DirEntry {
 	/// Gets the metadata, blocking
-	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
+	fn metadata_blocking(&self) -> Result<EntryMetadata, AppError> {
 		self.0
 			.metadata
 			.load(|| self::load_metadata(&self.source()).context("Unable to get metadata"))
 	}
 
 	/// Tries to gets the metadata
-	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<Arc<fs::Metadata>>, AppError> {
+	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryMetadata>, AppError> {
 		#[cloned(this = self)]
 		self.0.metadata.try_load(thread_pool, Priority::DEFAULT, move || {
 			self::load_metadata(&this.source()).context("Unable to get metadata")
@@ -93,8 +93,8 @@ impl DirEntry {
 	}
 
 	/// Sets the metadata of this entry
-	pub(super) fn set_metadata(&self, metadata: fs::Metadata) {
-		self.0.metadata.set(Arc::new(metadata));
+	pub(super) fn set_metadata(&self, metadata: EntryMetadata) {
+		self.0.metadata.set(metadata);
 	}
 }
 
@@ -130,7 +130,7 @@ impl DirEntry {
 	/// Gets the modified date, blocking
 	fn modified_date_blocking(&self) -> Result<SystemTime, AppError> {
 		let metadata = self.metadata_blocking()?;
-		metadata.modified().context("Unable to get modified date")
+		Ok(metadata.modified_time)
 	}
 }
 
@@ -139,7 +139,7 @@ impl DirEntry {
 	/// Gets the size, blocking
 	fn size_blocking(&self) -> Result<u64, AppError> {
 		let metadata = self.metadata_blocking()?;
-		Ok(metadata.len())
+		Ok(metadata.size)
 	}
 
 	/// Returns this image's file size
@@ -148,7 +148,7 @@ impl DirEntry {
 			return Ok(None);
 		};
 
-		Ok(Some(metadata.len()))
+		Ok(Some(metadata.size))
 	}
 }
 
@@ -249,6 +249,23 @@ pub enum EntrySource {
 	Path(Arc<Path>),
 }
 
+/// Entry metadata
+#[derive(Clone, Debug)]
+pub struct EntryMetadata {
+	modified_time: SystemTime,
+	size:          u64,
+}
+
+impl EntryMetadata {
+	/// Creates entry metadata from file metadata
+	pub fn from_file(metadata: &fs::Metadata) -> Result<Self, AppError> {
+		Ok(Self {
+			modified_time: metadata.modified().context("Unable to get modified time")?,
+			size:          metadata.len(),
+		})
+	}
+}
+
 /// Entry data
 #[derive(Clone, Debug)]
 pub enum EntryData {
@@ -257,12 +274,12 @@ pub enum EntryData {
 	Other,
 }
 
-fn load_metadata(source: &EntrySource) -> Result<Arc<Metadata>, AppError> {
+fn load_metadata(source: &EntrySource) -> Result<EntryMetadata, AppError> {
 	let metadata = match source {
 		EntrySource::Path(path) => fs::metadata(path).context("Unable to get metadata")?,
 	};
 
-	Ok(Arc::new(metadata))
+	EntryMetadata::from_file(&metadata)
 }
 
 fn load_entry_data(source: EntrySource, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {

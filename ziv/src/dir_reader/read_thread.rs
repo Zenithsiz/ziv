@@ -2,7 +2,11 @@
 
 // Imports
 use {
-	super::{CurEntry, DirEntry, entry::EntrySource},
+	super::{
+		CurEntry,
+		DirEntry,
+		entry::{EntryMetadata, EntrySource},
+	},
 	crate::util::AppError,
 	app_error::Context,
 	core::time::Duration,
@@ -51,17 +55,18 @@ impl ReadThread {
 			// If it's a directory, read it
 			true => self.read_dir(path, None)?,
 			// Otherwise, read it and the parent directory
-			false => self.read_file_and_parent(path, path_metadata)?,
+			false => self.read_file_and_parent(path, &path_metadata)?,
 		}
 
 		self.handle_watch_events();
 	}
 
 	/// Reads a file and it's parent directory
-	fn read_file_and_parent(&self, path: &Path, file_metadata: fs::Metadata) -> Result<(), AppError> {
+	fn read_file_and_parent(&self, path: &Path, file_metadata: &fs::Metadata) -> Result<(), AppError> {
 		// Read the specified entry first, add it and set it as the current entry.
 		let entry = self.read_path(path).context("Unable to read path")?;
-		entry.set_metadata(file_metadata);
+		let metadata = EntryMetadata::from_file(file_metadata).context("Unable to create entry metadata")?;
+		entry.set_metadata(metadata);
 		{
 			let mut inner = self.inner.lock();
 			inner.entries.insert(entry.clone());
