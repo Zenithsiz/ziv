@@ -6,6 +6,7 @@
 pub mod entries;
 pub mod entry;
 pub mod sort_order;
+mod sort_thread;
 
 // Exports
 pub use self::{
@@ -16,10 +17,10 @@ pub use self::{
 
 // Imports
 use {
+	self::sort_thread::SortThread,
 	crate::util::AppError,
 	app_error::Context,
 	core::{
-		mem,
 		ops::{Bound, IntoBounds},
 		time::Duration,
 	},
@@ -93,7 +94,8 @@ impl DirReader {
 		let sort_thread = thread::Builder::new()
 			.name("sort".to_owned())
 			.spawn(move || {
-				Self::set_sort_order_inner(&inner, &sort_thread_rx);
+				let sort_thread = SortThread::new(inner, sort_thread_rx);
+				sort_thread.run();
 				tracing::debug!("Sorting thread finished");
 			})
 			.context("Unable to spawn read thread")?;
@@ -373,90 +375,13 @@ impl DirReader {
 
 		Ok(Some(entry))
 	}
-
-	/// Sets the sort order
-	fn set_sort_order_inner(inner: &Arc<Mutex<Inner>>, rx: &mpsc::Receiver<SortOrder>) {
-		let mut next_sort_order = None;
-		let mut orphaned_entries = None::<std::vec::IntoIter<_>>;
-		while let Some(sort_order) = next_sort_order.take().or_else(|| rx.recv().ok()) {
-			// Checks whether a new sort order was issued so we can abort the current one
-			let mut check_for_new_sort = || {
-				if let Ok(sort_order) = rx.try_recv() {
-					next_sort_order = Some(sort_order);
-				}
-
-				next_sort_order.is_some()
-			};
-
-			// Get the entries to sort
-			let entries = {
-				let mut inner = inner.lock();
-				let prev_sort_order = inner.sort_order;
-				inner.sort_order = sort_order;
-
-				match prev_sort_order.kind == sort_order.kind {
-					// If we're just reversing the entries, set it on the entries and
-					// then just sort any orphaned entries from a previous sort attempt.
-					// Note: We can't just insert these entries, because they might not
-					//       be loaded for the current sort order, since they could have
-					//       been orphaned while sorting something else.
-					true => {
-						inner.entries.set_reverse(sort_order.reverse);
-						// TODO: Compute the index when reversing?
-						if let Some(cur_entry) = &mut inner.cur_entry {
-							cur_entry.idx = None;
-						}
-						drop(inner);
-
-						orphaned_entries.take().unwrap_or_default().collect::<Vec<_>>()
-					},
-
-					// Otherwise, take all the entries, and remove the index on the current one
-					false => {
-						let entries = mem::replace(&mut inner.entries, Entries::new(sort_order));
-						if let Some(cur_entry) = &mut inner.cur_entry {
-							cur_entry.idx = None;
-						}
-						drop(inner);
-
-						entries
-							.into_iter()
-							.chain(orphaned_entries.take().unwrap_or_default())
-							.collect::<Vec<_>>()
-					},
-				}
-			};
-
-			let mut inner = inner.lock();
-			inner.sort_progress = Some(SortProgress {
-				sorted: 0,
-				total:  entries.len(),
-			});
-
-			// TODO: Should we process the current item first?
-			let mut entries = entries.into_iter();
-			while let Some(entry) = entries.next() {
-				if check_for_new_sort() {
-					orphaned_entries = Some(entries);
-					break;
-				}
-
-				if let Err(err) = inner.insert(&entry) {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.path());
-				}
-
-				inner.sort_progress.as_mut().expect("We just inserted it").sorted += 1;
-			}
-
-			inner.sort_progress = None;
-		}
-	}
 }
 
 #[derive(derive_more::Debug)]
 struct Inner {
 	entries: Entries,
 
+	// TODO: Remove sort order and just get it from the entries?
 	sort_order:    SortOrder,
 	sort_progress: Option<SortProgress>,
 
