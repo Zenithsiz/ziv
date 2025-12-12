@@ -1,7 +1,5 @@
 //! Directory entry
 
-// TODO: All context should be inside of `.try_load`
-
 // Modules
 pub mod image;
 pub mod thumbnail;
@@ -81,19 +79,15 @@ impl DirEntry {
 	fn metadata_blocking(&self) -> Result<Arc<fs::Metadata>, AppError> {
 		self.0
 			.metadata
-			.load(|| self::load_metadata(&self.path()))
-			.context("Unable to get metadata")
+			.load(|| self::load_metadata(&self.path()).context("Unable to get metadata"))
 	}
 
 	/// Tries to gets the metadata
 	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<Arc<fs::Metadata>>, AppError> {
 		#[cloned(this = self)]
-		self.0
-			.metadata
-			.try_load(thread_pool, Priority::DEFAULT, move || {
-				self::load_metadata(&this.path())
-			})
-			.context("Unable to get metadata")
+		self.0.metadata.try_load(thread_pool, Priority::DEFAULT, move || {
+			self::load_metadata(&this.path()).context("Unable to get metadata")
+		})
 	}
 
 	/// Sets the metadata of this entry
@@ -108,8 +102,7 @@ impl DirEntry {
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
 		self.0
 			.data
-			.load(|| self::load_entry_data(self.path(), egui_ctx))
-			.context("Unable to get entry data")
+			.load(|| self::load_entry_data(self.path(), egui_ctx).context("Unable to load entry data"))
 	}
 
 	/// Returns this entry's data
@@ -119,17 +112,14 @@ impl DirEntry {
 		egui_ctx: &egui::Context,
 	) -> Result<Option<EntryData>, AppError> {
 		#[cloned(this = self, egui_ctx)]
-		self.0
-			.data
-			.try_load(thread_pool, Priority::HIGH, move || {
-				self::load_entry_data(this.path(), &egui_ctx)
-			})
-			.context("Unable to get entry data")
+		self.0.data.try_load(thread_pool, Priority::HIGH, move || {
+			self::load_entry_data(this.path(), &egui_ctx).context("Unable to load entry data")
+		})
 	}
 
 	/// Returns this entry's data
 	pub fn data_if_exists(&self) -> Result<Option<EntryData>, AppError> {
-		self.0.data.try_get().context("Unable to get entry data")
+		self.0.data.try_get()
 	}
 }
 
@@ -172,8 +162,8 @@ impl DirEntry {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
 			let path = this.path();
-			let data = this.data_blocking(&egui_ctx).context("Unable to get image kind")?;
-			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &path, &data)
+			let data = this.data_blocking(&egui_ctx).context("Unable to load data")?;
+			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &path, &data).context("Unable to create thumbnail")
 		})
 	}
 }
