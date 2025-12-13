@@ -87,8 +87,8 @@ impl DirEntry {
 			.load(|| self::load_metadata(&self.source()).context("Unable to get metadata"))
 	}
 
-	/// Tries to gets the metadata
-	fn try_metadata(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryMetadata>, AppError> {
+	/// Gets the metadata, loading it
+	fn metadata_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryMetadata>, AppError> {
 		#[cloned(this = self)]
 		self.0.metadata.try_load(thread_pool, Priority::DEFAULT, move || {
 			self::load_metadata(&this.source()).context("Unable to get metadata")
@@ -115,8 +115,8 @@ impl DirEntry {
 			.load(|| self::load_entry_data(self, egui_ctx).context("Unable to load entry data"))
 	}
 
-	/// Returns this entry's data
-	pub fn try_data(
+	/// Gets the entry's data, loading it
+	pub fn data_load(
 		&self,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
@@ -127,7 +127,7 @@ impl DirEntry {
 		})
 	}
 
-	/// Returns this entry's data
+	/// Gets the entry's data, if loaded
 	pub fn data_if_loaded(&self) -> Result<Option<EntryData>, AppError> {
 		self.0.data.try_get()
 	}
@@ -141,7 +141,7 @@ impl DirEntry {
 		Ok(metadata.modified_time)
 	}
 
-	/// Gets the modified date if loaded
+	/// Gets the modified date, if loaded
 	fn modified_date_if_loaded(&self) -> Result<Option<SystemTime>, AppError> {
 		let Some(metadata) = self.metadata_if_loaded()? else {
 			return Ok(None);
@@ -159,16 +159,16 @@ impl DirEntry {
 		Ok(metadata.size)
 	}
 
-	/// Returns this image's file size
-	pub fn try_size(&self, thread_pool: &PriorityThreadPool) -> Result<Option<u64>, AppError> {
-		let Some(metadata) = self.try_metadata(thread_pool)? else {
+	/// Gets the size, loading it
+	pub fn size_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<u64>, AppError> {
+		let Some(metadata) = self.metadata_load(thread_pool)? else {
 			return Ok(None);
 		};
 
 		Ok(Some(metadata.size))
 	}
 
-	/// Returns this image's file size if loaded
+	/// Gets the size, if loaded
 	pub fn size_if_loaded(&self) -> Result<Option<u64>, AppError> {
 		let Some(metadata) = self.metadata_if_loaded()? else {
 			return Ok(None);

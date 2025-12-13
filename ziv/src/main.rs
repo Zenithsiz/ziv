@@ -433,7 +433,7 @@ impl EguiApp {
 			}
 		}
 
-		if let Some(size) = self.try_with_entry(cur_entry, |this, entry| entry.try_size(&this.thread_pool)) {
+		if let Some(size) = self.try_with_entry(cur_entry, |this, entry| entry.size_load(&this.thread_pool)) {
 			write_str!(title, " {}", humansize::format_size(size, humansize::BINARY));
 		}
 
@@ -905,7 +905,7 @@ impl EguiApp {
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
 		self.with_entry(entry, |this, entry| try {
 			let Some(data) = entry
-				.try_data(&this.thread_pool, egui_ctx)
+				.data_load(&this.thread_pool, egui_ctx)
 				.context("Unable to load entry data")?
 			else {
 				return Ok(());
@@ -947,7 +947,7 @@ impl EguiApp {
 		//       calling `try_data`, because otherwise we'd potentially
 		//       miss it.
 		self.loaded_entries.insert(input.entry.clone().into());
-		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.try_data(&this.thread_pool, ui.ctx()))
+		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.data_load(&this.thread_pool, ui.ctx()))
 		else {
 			ui.centered_and_justified(|ui| {
 				ui.weak("Loading...");
@@ -1454,7 +1454,7 @@ impl eframe::App for EguiApp {
 				break;
 			};
 
-			match entry.try_data(&self.thread_pool, ctx) {
+			match entry.data_load(&self.thread_pool, ctx) {
 				// If we successfully loaded it, remove it from loading,
 				// and remove it from the list if it's non-media.
 				Ok(Some(data)) => {
