@@ -11,5 +11,3 @@
 - Option to load all the image kinds in the background
 
 - Getting an error from an entry should somehow automatically remove it from the list
-
-- Get rid of `clippy::significant_drop_tightening`, it has far too much noise to be worth it

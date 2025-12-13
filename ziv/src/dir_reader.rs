@@ -150,7 +150,6 @@ impl DirReader {
 			.take(len)
 			.cloned()
 			.collect();
-		drop(inner);
 
 		Ok(entries)
 	}
@@ -170,7 +169,6 @@ impl DirReader {
 			.take(len)
 			.cloned()
 			.collect();
-		drop(inner);
 
 		Ok(entries)
 	}

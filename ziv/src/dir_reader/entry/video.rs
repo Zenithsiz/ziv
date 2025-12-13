@@ -90,7 +90,7 @@ impl EntryVideo {
 		state.thread_status = DecoderThreadStatus::Started;
 
 		#[cloned(path = state.path, inner = self.inner;)]
-		thread::spawn(move || {
+		let _ = thread::spawn(move || {
 			let res: Result<_, AppError> = try {
 				let mut thread = DecoderThread::new(inner, &path)?;
 				thread.run()?
@@ -101,7 +101,6 @@ impl EntryVideo {
 				Err(err) => tracing::warn!("Unable to decode video: {err:?}"),
 			}
 		});
-		drop(state);
 	}
 
 	/// Stops the video
@@ -433,7 +432,6 @@ impl DecoderThread {
 		let mut state = self.inner.state.lock();
 		state.start_time = None;
 		state.cur_time = time;
-		drop(state);
 
 		Ok(())
 	}

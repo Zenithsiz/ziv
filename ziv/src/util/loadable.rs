@@ -87,7 +87,6 @@ impl<T, E> Loadable<T, E> {
 		};
 
 		inner.value = Some(res.clone());
-		drop(inner);
 
 		res.map(Some)
 	}
@@ -146,7 +145,6 @@ impl<T, E> Loadable<T, E> {
 					_ = task_tx.send(res);
 				});
 				inner.task_rx = Some(task_rx);
-				drop(inner);
 
 				Ok(None)
 			},
