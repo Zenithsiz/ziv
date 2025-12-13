@@ -265,7 +265,8 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "app-error"
 version = "0.1.0"
-source = "git+https://github.com/Zenithsiz/app-error?rev=455b7e5d3b99748657f7e55912cea4178c88e758#455b7e5d3b99748657f7e55912cea4178c88e758"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a03f14a783259cead5d653e52213b378718e63d61662e6e883de1d50e9e39d"
 dependencies = [
  "itertools 0.14.0",
 ]
@@ -5785,7 +5786,8 @@ dependencies = [
 [[package]]
 name = "zutil-cloned"
 version = "0.1.0"
-source = "git+https://github.com/Zenithsiz/zutil?rev=2913756373a37f36e50c2ffc90090b2ff1a7ce49#2913756373a37f36e50c2ffc90090b2ff1a7ce49"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2c735d6a4ffcc2f59af6177967ee0e25e9938411d5137ae421bd16e1524f2eb"
 dependencies = [
  "quote",
  "syn",
@@ -5794,7 +5796,8 @@ dependencies = [
 [[package]]
 name = "zutil-logger"
 version = "0.1.0"
-source = "git+https://github.com/Zenithsiz/zutil?rev=2913756373a37f36e50c2ffc90090b2ff1a7ce49#2913756373a37f36e50c2ffc90090b2ff1a7ce49"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c8dbf0e9190aded917d048533176339a10964c9fafee1735cf2110311322e50"
 dependencies = [
  "duplicate",
  "itertools 0.14.0",
