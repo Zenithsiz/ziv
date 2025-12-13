@@ -412,24 +412,22 @@ impl EguiApp {
 			cur_entry.file_name().expect("Entry had no file name").display()
 		);
 
+		if let Some(resolution) = self.try_with_entry(cur_entry, |this, cur_entry| {
+			cur_entry.resolution_load(&this.thread_pool)
+		}) {
+			write_str!(title, " {}x{}", resolution.width, resolution.height);
+		}
+
 		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) {
 			match data {
 				EntryData::Image(image) => {
-					if let Some(texture) = self.try_with_entry(cur_entry, |_, _| image.texture()) {
-						let [width, height] = texture.size();
-						write_str!(title, " {width}x{height}");
-					}
 					let format = image.format();
 					write_str!(title, " ({format:?})");
 				},
-				EntryData::Video(video) => {
-					if let Some([width, height]) = video.size() {
-						write_str!(title, " {width}x{height}");
-					}
+				EntryData::Video(video) =>
 					if let Some(duration) = video.duration() {
 						write_str!(title, " ({duration:.2?})");
-					}
-				},
+					},
 				EntryData::Other => self.remove_entry(cur_entry),
 			}
 		}

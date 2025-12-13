@@ -32,9 +32,11 @@ use {
 struct Inner {
 	source: Mutex<EntrySource>,
 
-	metadata:  Loadable<EntryMetadata>,
-	data:      Loadable<EntryData>,
-	thumbnail: Loadable<EntryThumbnail>,
+	metadata:   Loadable<EntryMetadata>,
+	data:       Loadable<EntryData>,
+	thumbnail:  Loadable<EntryThumbnail>,
+	// TODO: Should this be a loadable inside of `EntryImage` / `EntryVideo`?
+	resolution: Loadable<EntryResolution>,
 }
 
 #[derive(Clone, Debug)]
@@ -44,10 +46,11 @@ impl DirEntry {
 	/// Creates a new directory entry
 	pub(super) fn new(source: EntrySource) -> Self {
 		Self(Arc::new(Inner {
-			source:    Mutex::new(source),
-			metadata:  Loadable::new(),
-			data:      Loadable::new(),
-			thumbnail: Loadable::new(),
+			source:     Mutex::new(source),
+			metadata:   Loadable::new(),
+			data:       Loadable::new(),
+			thumbnail:  Loadable::new(),
+			resolution: Loadable::new(),
 		}))
 	}
 }
@@ -188,6 +191,24 @@ impl DirEntry {
 			let source = this.source();
 			let data = this.data_blocking().context("Unable to load data")?;
 			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data).context("Unable to create thumbnail")
+		})
+	}
+}
+
+/// Resolution
+impl DirEntry {
+	/// Gets the resolution, blocking
+	fn _resolution_blocking(&self) -> Result<EntryResolution, AppError> {
+		self.0
+			.resolution
+			.load(|| self::load_resolution(self).context("Unable to get resolution"))
+	}
+
+	/// Gets the resolution, loading it
+	pub fn resolution_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryResolution>, AppError> {
+		#[cloned(this = self)]
+		self.0.resolution.try_load(thread_pool, Priority::DEFAULT, move || {
+			self::load_resolution(&this).context("Unable to get resolution")
 		})
 	}
 }
@@ -355,6 +376,84 @@ fn load_metadata(source: &EntrySource) -> Result<EntryMetadata, AppError> {
 		},
 		EntrySource::Zip(zip) => Ok(zip.metadata.clone()),
 	}
+}
+
+/// Entry resolution
+#[derive(Clone, Debug)]
+pub struct EntryResolution {
+	// TODO: These should probably be `u32`s.
+	pub width:  usize,
+	pub height: usize,
+}
+
+fn load_resolution(entry: &DirEntry) -> Result<EntryResolution, AppError> {
+	let data = entry.data_blocking()?;
+
+	// If the image/video is loaded, get it from there
+	let resolution = match data {
+		EntryData::Image(image) => match image.texture()? {
+			Some(texture) => {
+				let [width, height] = texture.size();
+				EntryResolution { width, height }
+			},
+			None => {
+				fn get_resolution<R: io::Seek + io::BufRead>(
+					mut image_reader: ::image::ImageReader<R>,
+					format: ImageFormat,
+				) -> Result<EntryResolution, AppError> {
+					image_reader.set_format(format);
+					let (width, height) = image_reader.into_dimensions().context("Unable to read image")?;
+					Ok(EntryResolution {
+						width:  width as usize,
+						height: height as usize,
+					})
+				}
+
+				match entry.source() {
+					EntrySource::Path(path) => {
+						let image_reader = ::image::ImageReader::open(path).context("Unable to open image")?;
+						get_resolution(image_reader, image.format())?
+					},
+					EntrySource::Zip(zip) => {
+						// TODO: Could we get away without reading the whole file?
+						//       Unfortunately, `ImageReader` requires a `Seek`-able
+						//       reader, but even a buffered zip file isn't seekable.
+						let contents = zip.contents().context("Unable to read zip file contents")?;
+						let image_reader = ::image::ImageReader::new(io::Cursor::new(contents));
+						get_resolution(image_reader, image.format())?
+					},
+				}
+			},
+		},
+		EntryData::Video(video) => match video.size() {
+			Some([width, height]) => EntryResolution { width, height },
+			None => match entry.source() {
+				EntrySource::Path(path) => {
+					let input = ffmpeg_next::format::input(&path).context("Unable to open video")?;
+					let video_stream = input
+						.streams()
+						.best(ffmpeg_next::media::Type::Video)
+						.context("No video streams found")?;
+
+					// TODO: Do we actually have to create a decoder to get the dimensions?
+					let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
+						.context("Unable to build decoder")?;
+					let decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
+
+					let width = decoder.width();
+					let height = decoder.height();
+					EntryResolution {
+						width:  width as usize,
+						height: height as usize,
+					}
+				},
+				EntrySource::Zip(_) => app_error::bail!("Videos inside of zip files aren't supported"),
+			},
+		},
+		EntryData::Other => app_error::bail!("Non-media types have no resolution"),
+	};
+
+	Ok(resolution)
 }
 
 fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
