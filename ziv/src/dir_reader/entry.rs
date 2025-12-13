@@ -11,7 +11,10 @@ pub use self::{image::EntryImage, thumbnail::EntryThumbnail, video::EntryVideo};
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	crate::{
+		dir_reader::sort_order::SortOrderResolutionDir,
+		util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	},
 	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash},
@@ -220,6 +223,26 @@ impl DirEntry {
 
 				u64::cmp(&lhs, &rhs)
 			},
+			SortOrderKind::Resolution(dir) => {
+				fn resolution(entry: &DirEntry) -> Result<EntryResolution, AppError> {
+					let data = entry.data_if_loaded()?.context("Missing data")?;
+					let resolution = match data {
+						EntryData::Image(image) => image.resolution_if_loaded()?.context("Missing resolution")?,
+						EntryData::Video(video) => video.resolution_if_loaded()?.context("Missing resolution")?,
+						// TODO: Is a resolution of 0 fine for this?
+						EntryData::Other => EntryResolution { width: 0, height: 0 },
+					};
+
+					Ok(resolution)
+				}
+
+				let lhs = resolution(self)?;
+				let rhs = resolution(other)?;
+				match dir {
+					SortOrderResolutionDir::Width => usize::cmp(&lhs.width, &rhs.width),
+					SortOrderResolutionDir::Height => usize::cmp(&lhs.height, &rhs.height),
+				}
+			},
 		};
 
 		let order = match order.reverse {
@@ -231,11 +254,25 @@ impl DirEntry {
 	}
 
 	/// Returns if this entry is loaded for `order`
-	pub(super) fn is_loaded_for_order(&self, order: SortOrder) -> bool {
-		match order.kind {
+	pub(super) fn is_loaded_for_order(&self, order: SortOrder) -> Result<bool, AppError> {
+		let is_loaded = match order.kind {
 			SortOrderKind::FileName => true,
 			SortOrderKind::ModificationDate | SortOrderKind::Size => self.0.metadata.is_loaded(),
-		}
+			SortOrderKind::Resolution(_) => {
+				// TODO: Is it fine to
+				let Some(data) = self.0.data.try_get()? else {
+					return Ok(false);
+				};
+
+				match data {
+					EntryData::Image(image) => image.resolution_is_loaded(),
+					EntryData::Video(video) => video.resolution_is_loaded(),
+					EntryData::Other => true,
+				}
+			},
+		};
+
+		Ok(is_loaded)
 	}
 
 	/// Loads the necessary fields for `order`
@@ -244,6 +281,11 @@ impl DirEntry {
 			SortOrderKind::FileName => _ = self.file_name().context("Unable to load file name")?,
 			SortOrderKind::ModificationDate => _ = self.modified_date_blocking()?,
 			SortOrderKind::Size => _ = self.size_blocking()?,
+			SortOrderKind::Resolution(_) => match self.data_blocking()? {
+				EntryData::Image(image) => _ = image.resolution_blocking()?,
+				EntryData::Video(video) => _ = video.resolution_blocking()?,
+				EntryData::Other => (),
+			},
 		}
 
 		Ok(())

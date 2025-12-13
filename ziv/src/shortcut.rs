@@ -2,7 +2,11 @@
 
 // Imports
 use {
-	crate::{ViewMode, dir_reader::SortOrderKind, util::hashmap_serialize_sorted},
+	crate::{
+		ViewMode,
+		dir_reader::{SortOrderKind, sort_order::SortOrderResolutionDir},
+		util::hashmap_serialize_sorted,
+	},
 	egui::Modifiers,
 	serde::de::Error as DeserializeError,
 	std::collections::HashMap,
@@ -54,13 +58,14 @@ impl Default for Shortcuts {
 			toggle_pause:            egui::Key::Space.into(),
 			quit:                    egui::Key::Q.into(),
 			toggle_display_mode:     egui::Key::Backspace.into(),
-			sort:                    SortOrderKind::VARIANTS
-				.iter()
-				.map(|&kind| {
+			sort:                    SortOrderKind::variants()
+				.map(|kind| {
 					let key = match kind {
 						SortOrderKind::FileName => egui::Key::F1,
 						SortOrderKind::ModificationDate => egui::Key::F2,
 						SortOrderKind::Size => egui::Key::F3,
+						SortOrderKind::Resolution(SortOrderResolutionDir::Width) => egui::Key::F4,
+						SortOrderKind::Resolution(SortOrderResolutionDir::Height) => egui::Key::F5,
 					};
 
 					(kind, key.into())

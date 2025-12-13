@@ -2,11 +2,13 @@
 
 // Imports
 use {
-	super::{DirEntry, SortOrder, SortOrderKind},
+	super::{DirEntry, SortOrder, SortOrderKind, sort_order::SortOrderResolutionDir},
 	core::ops::{Bound, IntoBounds},
 	ref_cast::RefCast,
 	std::borrow::Borrow,
 };
+
+// TODO: We need to be able to store duplicates here
 
 /// Entry using file name
 #[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
@@ -56,11 +58,29 @@ impl Ord for DirEntrySize {
 	}
 }
 
+/// Entry using resolution
+#[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
+#[repr(transparent)]
+struct DirEntryResolution<const DIR: SortOrderResolutionDir>(DirEntry);
+
+impl<const DIR: SortOrderResolutionDir> Ord for DirEntryResolution<DIR> {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.0
+			.cmp_with(&other.0, SortOrder {
+				reverse: false,
+				kind:    super::SortOrderKind::Resolution(DIR),
+			})
+			.expect("Entry wasn't loaded")
+	}
+}
+
 #[derive(Debug)]
 enum Inner {
 	FileName(indexset::BTreeSet<DirEntryFileName>),
 	ModificationDate(indexset::BTreeSet<DirEntryModifiedDate>),
 	Size(indexset::BTreeSet<DirEntrySize>),
+	ResolutionWidth(indexset::BTreeSet<DirEntryResolution<{ SortOrderResolutionDir::Width }>>),
+	ResolutionHeight(indexset::BTreeSet<DirEntryResolution<{ SortOrderResolutionDir::Height }>>),
 }
 
 /// Entries
@@ -76,6 +96,10 @@ impl Entries {
 			SortOrderKind::FileName => Inner::FileName(indexset::BTreeSet::new()),
 			SortOrderKind::ModificationDate => Inner::ModificationDate(indexset::BTreeSet::new()),
 			SortOrderKind::Size => Inner::Size(indexset::BTreeSet::new()),
+			SortOrderKind::Resolution(SortOrderResolutionDir::Width) =>
+				Inner::ResolutionWidth(indexset::BTreeSet::new()),
+			SortOrderKind::Resolution(SortOrderResolutionDir::Height) =>
+				Inner::ResolutionHeight(indexset::BTreeSet::new()),
 		};
 
 		Self {
@@ -89,6 +113,8 @@ impl Entries {
 			Inner::FileName(_) => SortOrderKind::FileName,
 			Inner::ModificationDate(_) => SortOrderKind::ModificationDate,
 			Inner::Size(_) => SortOrderKind::Size,
+			Inner::ResolutionWidth(_) => SortOrderKind::Resolution(SortOrderResolutionDir::Width),
+			Inner::ResolutionHeight(_) => SortOrderKind::Resolution(SortOrderResolutionDir::Height),
 		};
 
 		SortOrder {
@@ -195,6 +221,8 @@ enum RangeInner<'a> {
 	FileName(#[debug(ignore)] indexset::Range<'a, DirEntryFileName>),
 	ModificationDate(#[debug(ignore)] indexset::Range<'a, DirEntryModifiedDate>),
 	Size(#[debug(ignore)] indexset::Range<'a, DirEntrySize>),
+	ResolutionWidth(#[debug(ignore)] indexset::Range<'a, DirEntryResolution<{ SortOrderResolutionDir::Width }>>),
+	ResolutionHeight(#[debug(ignore)] indexset::Range<'a, DirEntryResolution<{ SortOrderResolutionDir::Height }>>),
 }
 
 #[derive(Debug)]
@@ -207,20 +235,30 @@ impl<'a> Iterator for Range<'a> {
 	type Item = &'a DirEntry;
 
 	fn next(&mut self) -> Option<Self::Item> {
+		macro inner($iter:ident) {
+			self::iter_next($iter, self.reverse).map(|entry| &entry.0)
+		}
 		match &mut self.iter {
-			RangeInner::FileName(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
-			RangeInner::ModificationDate(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
-			RangeInner::Size(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+			RangeInner::FileName(iter) => inner!(iter),
+			RangeInner::ModificationDate(iter) => inner!(iter),
+			RangeInner::Size(iter) => inner!(iter),
+			RangeInner::ResolutionWidth(iter) => inner!(iter),
+			RangeInner::ResolutionHeight(iter) => inner!(iter),
 		}
 	}
 }
 
 impl DoubleEndedIterator for Range<'_> {
 	fn next_back(&mut self) -> Option<Self::Item> {
+		macro inner($iter:ident) {
+			self::iter_next_back($iter, self.reverse).map(|entry| &entry.0)
+		}
 		match &mut self.iter {
-			RangeInner::FileName(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
-			RangeInner::ModificationDate(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
-			RangeInner::Size(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+			RangeInner::FileName(iter) => inner!(iter),
+			RangeInner::ModificationDate(iter) => inner!(iter),
+			RangeInner::Size(iter) => inner!(iter),
+			RangeInner::ResolutionWidth(iter) => inner!(iter),
+			RangeInner::ResolutionHeight(iter) => inner!(iter),
 		}
 	}
 }
@@ -230,6 +268,8 @@ enum IterInner<'a> {
 	FileName(#[debug(ignore)] indexset::Iter<'a, DirEntryFileName>),
 	ModificationDate(#[debug(ignore)] indexset::Iter<'a, DirEntryModifiedDate>),
 	Size(#[debug(ignore)] indexset::Iter<'a, DirEntrySize>),
+	ResolutionWidth(#[debug(ignore)] indexset::Iter<'a, DirEntryResolution<{ SortOrderResolutionDir::Width }>>),
+	ResolutionHeight(#[debug(ignore)] indexset::Iter<'a, DirEntryResolution<{ SortOrderResolutionDir::Height }>>),
 }
 
 #[derive(Debug)]
@@ -242,20 +282,30 @@ impl<'a> Iterator for Iter<'a> {
 	type Item = &'a DirEntry;
 
 	fn next(&mut self) -> Option<Self::Item> {
+		macro inner($iter:ident) {
+			self::iter_next($iter, self.reverse).map(|entry| &entry.0)
+		}
 		match &mut self.iter {
-			IterInner::FileName(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
-			IterInner::ModificationDate(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
-			IterInner::Size(iter) => self::iter_next(iter, self.reverse).map(|entry| &entry.0),
+			IterInner::FileName(iter) => inner!(iter),
+			IterInner::ModificationDate(iter) => inner!(iter),
+			IterInner::Size(iter) => inner!(iter),
+			IterInner::ResolutionWidth(iter) => inner!(iter),
+			IterInner::ResolutionHeight(iter) => inner!(iter),
 		}
 	}
 }
 
 impl DoubleEndedIterator for Iter<'_> {
 	fn next_back(&mut self) -> Option<Self::Item> {
+		macro inner($iter:ident) {
+			self::iter_next_back($iter, self.reverse).map(|entry| &entry.0)
+		}
 		match &mut self.iter {
-			IterInner::FileName(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
-			IterInner::ModificationDate(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
-			IterInner::Size(iter) => self::iter_next_back(iter, self.reverse).map(|entry| &entry.0),
+			IterInner::FileName(iter) => inner!(iter),
+			IterInner::ModificationDate(iter) => inner!(iter),
+			IterInner::Size(iter) => inner!(iter),
+			IterInner::ResolutionWidth(iter) => inner!(iter),
+			IterInner::ResolutionHeight(iter) => inner!(iter),
 		}
 	}
 }
@@ -293,7 +343,7 @@ fn iter_next_back<I: DoubleEndedIterator>(iter: &mut I, reverse: bool) -> Option
 	}
 }
 
-macro match_inner($name:ident $(: $T:ident)? @ $inner:expr => $res:expr) {
+macro match_inner($name:ident $(: $T:ident)? @ $inner:expr => $res:expr) {{
 	match $inner {
 		Inner::FileName($name) => {
 			$( type $T = DirEntryFileName; )?
@@ -307,26 +357,42 @@ macro match_inner($name:ident $(: $T:ident)? @ $inner:expr => $res:expr) {
 			$( type $T = DirEntrySize; )?
 			$res
 		},
+		Inner::ResolutionWidth($name) => {
+			$( type $T = DirEntryResolution<{ SortOrderResolutionDir::Width }>; )?
+			$res
+		},
+		Inner::ResolutionHeight($name) => {
+			$( type $T = DirEntryResolution<{ SortOrderResolutionDir::Height }>; )?
+			$res
+		},
 	}
-}
+}}
 
 macro DirEntryWrapper {
-	derive() ($(#[$meta:meta])* struct $Name:ident(DirEntry);) => {
-		impl Borrow<DirEntry> for $Name {
+	derive() (
+		$(#[$meta:meta])*
+		struct $Name:ident
+		$(<
+
+			$( const $GenericConst:ident: $GenericTy:ty )*
+		>)?
+		(DirEntry);
+	) => {
+		impl $(< $( const $GenericConst: $GenericTy )* >)? Borrow<DirEntry> for $Name $(< $( $GenericConst )* >)? {
 			fn borrow(&self) -> &DirEntry {
 				&self.0
 			}
 		}
 
-		impl PartialEq for $Name {
+		impl $(< $( const $GenericConst: $GenericTy )* >)? PartialEq for $Name $(< $( $GenericConst )* >)? {
 			fn eq(&self, other: &Self) -> bool {
 				self.cmp(other).is_eq()
 			}
 		}
 
-		impl Eq for $Name {}
+		impl $(< $( const $GenericConst: $GenericTy )* >)? Eq for $Name $(< $( $GenericConst )* >)? {}
 
-		impl PartialOrd for $Name {
+		impl $(< $( const $GenericConst: $GenericTy )* >)? PartialOrd for $Name $(< $( $GenericConst )* >)? {
 			fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
 				Some(self.cmp(other))
 			}

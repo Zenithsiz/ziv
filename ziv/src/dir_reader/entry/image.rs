@@ -110,7 +110,7 @@ impl EntryImage {
 	}
 
 	/// Gets this image's resolution, blocking
-	pub fn _resolution_blocking(&self) -> Result<EntryResolution, AppError> {
+	pub fn resolution_blocking(&self) -> Result<EntryResolution, AppError> {
 		self.inner.resolution.load(move || self.load_resolution())
 	}
 
@@ -123,8 +123,13 @@ impl EntryImage {
 	}
 
 	/// Gets this image's resolution, if loaded
-	pub fn _resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
+	pub fn resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
 		self.inner.resolution.try_get()
+	}
+
+	/// Returns if this image's resolution is loaded
+	pub fn resolution_is_loaded(&self) -> bool {
+		self.inner.resolution.is_loaded()
 	}
 
 	/// Creates the image's texture

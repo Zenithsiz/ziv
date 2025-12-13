@@ -271,8 +271,22 @@ impl Inner {
 
 			// If it has an index, or isn't loaded for the current sort order,
 			// there's nothing we can do without blocking, so quit
-			if cur_entry.idx.is_some() || !cur_entry.entry.is_loaded_for_order(self.entries.sort_order()) {
+			if cur_entry.idx.is_some() {
 				break cur_entry;
+			}
+			match cur_entry.entry.is_loaded_for_order(self.entries.sort_order()) {
+				Ok(is_loaded) =>
+					if !is_loaded {
+						break cur_entry;
+					},
+				Err(err) => {
+					tracing::warn!(
+						"Unable to load entry {:?}, removing: {err:?}",
+						cur_entry.source().name()
+					);
+					self.cur_entry = None;
+					continue;
+				},
 			}
 
 			// Otherwise, try to search for it's index.

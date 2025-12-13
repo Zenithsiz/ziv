@@ -148,7 +148,7 @@ impl EntryVideo {
 	}
 
 	/// Gets this video's resolution, blocking
-	pub fn _resolution_blocking(&self) -> Result<EntryResolution, AppError> {
+	pub fn resolution_blocking(&self) -> Result<EntryResolution, AppError> {
 		self.inner.resolution.load(move || self.load_resolution())
 	}
 
@@ -161,8 +161,13 @@ impl EntryVideo {
 	}
 
 	/// Gets this video's resolution, if loaded
-	pub fn _resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
+	pub fn resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
 		self.inner.resolution.try_get()
+	}
+
+	/// Returns if this video's resolution is loaded
+	pub fn resolution_is_loaded(&self) -> bool {
+		self.inner.resolution.is_loaded()
 	}
 
 	/// Returns the size of the video
