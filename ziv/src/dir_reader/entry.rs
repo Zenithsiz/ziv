@@ -95,6 +95,11 @@ impl DirEntry {
 		})
 	}
 
+	/// Gets the metadata, if loaded
+	fn metadata_if_loaded(&self) -> Result<Option<EntryMetadata>, AppError> {
+		self.0.metadata.try_get()
+	}
+
 	/// Sets the metadata of this entry
 	pub(super) fn set_metadata(&self, metadata: EntryMetadata) {
 		self.0.metadata.set(metadata);
@@ -123,7 +128,7 @@ impl DirEntry {
 	}
 
 	/// Returns this entry's data
-	pub fn data_if_exists(&self) -> Result<Option<EntryData>, AppError> {
+	pub fn data_if_loaded(&self) -> Result<Option<EntryData>, AppError> {
 		self.0.data.try_get()
 	}
 }
@@ -134,6 +139,15 @@ impl DirEntry {
 	fn modified_date_blocking(&self) -> Result<SystemTime, AppError> {
 		let metadata = self.metadata_blocking()?;
 		Ok(metadata.modified_time)
+	}
+
+	/// Gets the modified date if loaded
+	fn modified_date_if_loaded(&self) -> Result<Option<SystemTime>, AppError> {
+		let Some(metadata) = self.metadata_if_loaded()? else {
+			return Ok(None);
+		};
+
+		Ok(Some(metadata.modified_time))
 	}
 }
 
@@ -148,6 +162,15 @@ impl DirEntry {
 	/// Returns this image's file size
 	pub fn try_size(&self, thread_pool: &PriorityThreadPool) -> Result<Option<u64>, AppError> {
 		let Some(metadata) = self.try_metadata(thread_pool)? else {
+			return Ok(None);
+		};
+
+		Ok(Some(metadata.size))
+	}
+
+	/// Returns this image's file size if loaded
+	pub fn size_if_loaded(&self) -> Result<Option<u64>, AppError> {
+		let Some(metadata) = self.metadata_if_loaded()? else {
 			return Ok(None);
 		};
 
@@ -175,7 +198,7 @@ impl DirEntry {
 
 /// Misc.
 impl DirEntry {
-	/// Compares two directory entries according to a sort order
+	/// Compares two directory entries according to a sort order.
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Result<Ordering, AppError> {
 		let cmp = match order.kind {
 			SortOrderKind::FileName => {
@@ -190,14 +213,14 @@ impl DirEntry {
 				)
 			},
 			SortOrderKind::ModificationDate => {
-				let lhs = self.modified_date_blocking()?;
-				let rhs = other.modified_date_blocking()?;
+				let lhs = self.modified_date_if_loaded()?.context("Missing modified date")?;
+				let rhs = other.modified_date_if_loaded()?.context("Missing modified date")?;
 
 				SystemTime::cmp(&lhs, &rhs)
 			},
 			SortOrderKind::Size => {
-				let lhs = self.size_blocking()?;
-				let rhs = other.size_blocking()?;
+				let lhs = self.size_if_loaded()?.context("Missing size")?;
+				let rhs = other.size_if_loaded()?.context("Missing size")?;
 
 				u64::cmp(&lhs, &rhs)
 			},

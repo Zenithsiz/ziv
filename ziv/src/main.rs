@@ -338,7 +338,7 @@ impl EguiApp {
 		self.resized_image = false;
 
 		if let Some(EntryData::Video(video)) =
-			self.try_with_entry(prev_entry, |_, prev_entry| prev_entry.data_if_exists()) &&
+			self.try_with_entry(prev_entry, |_, prev_entry| prev_entry.data_if_loaded()) &&
 			video.set_offscreen()
 		{
 			video.pause();
@@ -385,7 +385,7 @@ impl EguiApp {
 				.expect("Just checked it wasn't empty");
 
 			self.with_entry(&entry, |_, entry| {
-				let Some(data) = entry.data_if_exists()? else {
+				let Some(data) = entry.data_if_loaded()? else {
 					return Ok(());
 				};
 
@@ -412,7 +412,7 @@ impl EguiApp {
 			cur_entry.file_name().expect("Entry had no file name").display()
 		);
 
-		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_exists()) {
+		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) {
 			match data {
 				EntryData::Image(image) => {
 					if let Some(texture) = self.try_with_entry(cur_entry, |_, _| image.texture()) {
@@ -1273,7 +1273,7 @@ impl EguiApp {
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
 			let Some(EntryData::Video(video)) =
-				self.try_with_entry(&cur_entry, |_, cur_entry| cur_entry.data_if_exists()) &&
+				self.try_with_entry(&cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) &&
 			video.set_offscreen()
 		{
 			video.pause();
