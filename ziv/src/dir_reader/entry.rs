@@ -17,12 +17,14 @@ use {
 	core::{cmp::Ordering, hash::Hash},
 	parking_lot::Mutex,
 	std::{
-		ffi::{OsStr, OsString},
+		ffi::OsStr,
 		fs,
+		io::{self, Read},
 		path::{Path, PathBuf},
 		sync::Arc,
 		time::SystemTime,
 	},
+	zip::{ZipArchive, read::ZipFile},
 	zutil_cloned::cloned,
 };
 
@@ -66,11 +68,12 @@ impl DirEntry {
 /// File name
 impl DirEntry {
 	/// Returns this entry's file name
-	pub fn file_name(&self) -> Result<OsString, AppError> {
+	pub fn file_name(&self) -> Result<PathBuf, AppError> {
 		// TODO: Avoid having to clone the file name
 		let source = self.source();
 		match source {
-			EntrySource::Path(path) => path.file_name().context("Missing file name").map(OsStr::to_owned),
+			EntrySource::Path(path) => path.file_name().context("Missing file name").map(PathBuf::from),
+			EntrySource::Zip(zip) => Ok(zip.file_name.clone()),
 		}
 	}
 }
@@ -104,7 +107,7 @@ impl DirEntry {
 	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
 		self.0
 			.data
-			.load(|| self::load_entry_data(self.source(), egui_ctx).context("Unable to load entry data"))
+			.load(|| self::load_entry_data(self, egui_ctx).context("Unable to load entry data"))
 	}
 
 	/// Returns this entry's data
@@ -115,7 +118,7 @@ impl DirEntry {
 	) -> Result<Option<EntryData>, AppError> {
 		#[cloned(this = self, egui_ctx)]
 		self.0.data.try_load(thread_pool, Priority::HIGH, move || {
-			self::load_entry_data(this.source(), &egui_ctx).context("Unable to load entry data")
+			self::load_entry_data(&this, &egui_ctx).context("Unable to load entry data")
 		})
 	}
 
@@ -179,8 +182,8 @@ impl DirEntry {
 				let lhs = self.file_name().context("Unable to get file name")?;
 				let rhs = other.file_name().context("Unable to get file name")?;
 				natord::compare_iter(
-					lhs.as_encoded_bytes().iter(),
-					rhs.as_encoded_bytes().iter(),
+					lhs.as_os_str().as_encoded_bytes().iter(),
+					rhs.as_os_str().as_encoded_bytes().iter(),
 					|&c| c.is_ascii_whitespace(),
 					|&l, &r| l.cmp(r),
 					|&c| c.is_ascii_digit().then(|| isize::from(c - b'0')),
@@ -242,18 +245,69 @@ impl Hash for DirEntry {
 	}
 }
 
+/// Entry source from a zip file
+#[derive(Clone, Debug)]
+pub struct EntrySourceZip {
+	pub path:      Arc<Path>,
+	pub file_name: PathBuf,
+	pub metadata:  EntryMetadata,
+	pub idx:       usize,
+	// TODO: Should we move this elsewhere to avoid every entry storing it?
+	pub archive:   Arc<Mutex<ZipArchive<fs::File>>>,
+}
+
+impl EntrySourceZip {
+	/// Accesses this file.
+	pub fn try_with_file<O>(
+		&self,
+		f: impl FnOnce(ZipFile<'_, fs::File>) -> Result<O, AppError>,
+	) -> Result<O, AppError> {
+		let mut archive = self.archive.lock();
+		let file = archive.by_index(self.idx).context("Unable to get zip file")?;
+		f(file)
+	}
+
+	/// Reads the contents of this entry
+	pub fn contents(&self) -> Result<Vec<u8>, AppError> {
+		self.try_with_file(|mut file| {
+			let mut contents = Vec::with_capacity(file.size() as usize);
+			file.read_to_end(&mut contents).context("Unable to read zip file")?;
+
+			Ok(contents)
+		})
+	}
+
+	/// Returns if the entry is a directory
+	pub fn is_dir(&self) -> Result<bool, AppError> {
+		self.try_with_file(|file| Ok(file.is_dir()))
+	}
+}
+
 /// Entry source
 #[derive(Clone, Debug)]
 pub enum EntrySource {
 	/// Filesystem path
 	Path(Arc<Path>),
+
+	/// Zip file
+	Zip(Arc<EntrySourceZip>),
+}
+
+impl EntrySource {
+	/// Returns a name for this entry
+	pub fn name(&self) -> String {
+		match self {
+			Self::Path(path) => path.display().to_string(),
+			Self::Zip(zip) => zip.path.join(&zip.file_name).display().to_string(),
+		}
+	}
 }
 
 /// Entry metadata
 #[derive(Clone, Debug)]
 pub struct EntryMetadata {
-	modified_time: SystemTime,
-	size:          u64,
+	pub modified_time: SystemTime,
+	pub size:          u64,
 }
 
 impl EntryMetadata {
@@ -275,46 +329,84 @@ pub enum EntryData {
 }
 
 fn load_metadata(source: &EntrySource) -> Result<EntryMetadata, AppError> {
-	let metadata = match source {
-		EntrySource::Path(path) => fs::metadata(path).context("Unable to get metadata")?,
-	};
-
-	EntryMetadata::from_file(&metadata)
+	match source {
+		EntrySource::Path(path) => {
+			let metadata = fs::metadata(path).context("Unable to get metadata")?;
+			EntryMetadata::from_file(&metadata)
+		},
+		EntrySource::Zip(zip) => Ok(zip.metadata.clone()),
+	}
 }
 
-fn load_entry_data(source: EntrySource, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
-	let EntrySource::Path(path) = source;
+fn load_entry_data(entry: &DirEntry, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
+	let source = entry.source();
+	let file_name = entry.file_name().context("Entry had no file name")?;
+
+	// Test against common zip archives
+	const COMMON_ZIP_FORMATS: &[&str] = &["zip", "cbz"];
+	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
+		COMMON_ZIP_FORMATS.contains(&ext)
+	{
+		return Ok(EntryData::Other);
+	}
 
 	// Test against video file formats before we need to read the file.
 	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
-	if let Some(ext) = path.extension().and_then(OsStr::to_str) &&
+	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
 		COMMON_VIDEO_FORMATS.contains(&ext)
 	{
+		// TODO: Support videos inside of other sources
+		let EntrySource::Path(path) = source else {
+			app_error::bail!("Videos are only supported by path")
+		};
+
 		let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
 		return Ok(EntryData::Video(video));
 	}
 
 	// If we got a format just from the path, return it
 	// TODO: Should we trust the extension?
-	if let Some(ext) = path.extension() &&
+	if let Some(ext) = file_name.extension() &&
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
-		let image = EntryImage::new(path, format);
+		let image = EntryImage::new(source, format);
 		return Ok(EntryData::Image(image));
 	}
 
 	// If it's a directory it's non-media
-	if fs::metadata(&path).context("Unable to get file metadata")?.is_dir() {
+	let is_dir = match &source {
+		EntrySource::Path(path) => fs::metadata(path).context("Unable to get file metadata")?.is_dir(),
+		// TODO: Check for directories inside of zip files
+		EntrySource::Zip(zip) => zip.is_dir().context("Unable to check if zip entry was a directory")?,
+	};
+	if is_dir {
 		return Ok(EntryData::Other);
 	}
 
 	// Otherwise, try to guess it by opening it with `image`
-	let reader = ::image::ImageReader::open(&path)
-		.context("Unable to create image reader")?
-		.with_guessed_format()
-		.context("Unable to read file")?;
-	if let Some(format) = reader.format() {
-		let image = EntryImage::new(path, format);
+	let format = match &source {
+		EntrySource::Path(path) => ::image::ImageReader::open(path)
+			.context("Unable to create image reader")?
+			.with_guessed_format()
+			.context("Unable to read file")?
+			.format(),
+
+		// TODO: `with_guessed_format` only uses the first 16 bytes, so we just read that
+		EntrySource::Zip(zip) => zip
+			.try_with_file(|mut file| {
+				let mut contents = [0; 16];
+				file.read_exact(&mut contents).context("Unable to read contents")?;
+				let format = ::image::ImageReader::new(io::Cursor::new(contents))
+					.with_guessed_format()
+					.context("Unable to read file")?
+					.format();
+
+				Ok(format)
+			})
+			.context("Unable to guess zip entry format")?,
+	};
+	if let Some(format) = format {
+		let image = EntryImage::new(source, format);
 		return Ok(EntryData::Image(image));
 	}
 
@@ -324,12 +416,15 @@ fn load_entry_data(source: EntrySource, egui_ctx: &egui::Context) -> Result<Entr
 	// TODO: Currently we detect `svg`s as a video format (using
 	//       `svg_pipe`). However, `image` doesn't support `svg`s,
 	//       so for now we allow this.
-	const DISALLOWED_VIDEO_FORMATS: &[&str] = &["lrc", "tty"];
-	if let Ok(input) = ffmpeg_next::format::input(&path) &&
-		!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
-	{
-		let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
-		return Ok(EntryData::Video(video));
+	// TODO: Support videos inside of other sources
+	if let EntrySource::Path(path) = source {
+		const DISALLOWED_VIDEO_FORMATS: &[&str] = &["lrc", "tty", "mjpeg"];
+		if let Ok(input) = ffmpeg_next::format::input(&path) &&
+			!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
+		{
+			let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
+			return Ok(EntryData::Video(video));
+		}
 	}
 
 	Ok(EntryData::Other)

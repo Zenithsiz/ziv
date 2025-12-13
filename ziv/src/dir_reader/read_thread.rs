@@ -5,7 +5,7 @@ use {
 	super::{
 		CurEntry,
 		DirEntry,
-		entry::{EntryMetadata, EntrySource},
+		entry::{EntryMetadata, EntrySource, EntrySourceZip},
 	},
 	crate::util::AppError,
 	app_error::Context,
@@ -15,7 +15,9 @@ use {
 		fs,
 		path::Path,
 		sync::{Arc, mpsc},
+		time::SystemTime,
 	},
+	zip::ZipArchive,
 	zutil_cloned::cloned,
 };
 
@@ -55,10 +57,71 @@ impl ReadThread {
 			// If it's a directory, read it
 			true => self.read_dir(path, None)?,
 			// Otherwise, read it and the parent directory
-			false => self.read_file_and_parent(path, &path_metadata)?,
+			false => match self::try_archive(path) {
+				Some(zip) => self.read_archive(path, zip)?,
+				None => self.read_file_and_parent(path, &path_metadata)?,
+			},
 		}
 
 		self.handle_watch_events();
+	}
+
+	/// Reads an archive as a directory
+	fn read_archive(&self, path: &Path, zip: ZipArchive<fs::File>) -> Result<(), AppError> {
+		let path = Arc::<Path>::from(path);
+
+		let files_len = zip.len();
+		let zip = Arc::new(Mutex::new(zip));
+		for idx in 0..files_len {
+			let (file_name, metadata) = {
+				let mut zip = zip.lock();
+				// TODO: `by_index_raw` also seeks the inner reader,
+				//       which theoretically shouldn't perform any
+				//       IO on `fs::File`, but can we avoid that?
+				let file = zip.by_index_raw(idx).context("Unable to get file")?;
+
+				let file_name = file.enclosed_name().context("File name wasn't enclosed")?;
+
+				let modified_time_secs_from_epoch = file.extra_data_fields().find_map(|field| match field {
+					zip::ExtraField::ExtendedTimestamp(timestamp) => timestamp.mod_time(),
+					zip::ExtraField::Ntfs(_) => None,
+				});
+				let modified_time = match modified_time_secs_from_epoch {
+					Some(secs_from_epoch) => SystemTime::UNIX_EPOCH + Duration::from_secs(secs_from_epoch.into()),
+					// TODO: Should this be fallible?
+					None => {
+						let time = file.last_modified().context("File had no modified time")?;
+						let time = time::OffsetDateTime::try_from(time).context("File had an invalid modified time")?;
+
+						let unix_epoch = time::OffsetDateTime::UNIX_EPOCH;
+						let time_from_epoch_abs = (time - unix_epoch).unsigned_abs();
+						match time > unix_epoch {
+							true => SystemTime::UNIX_EPOCH + time_from_epoch_abs,
+							false => SystemTime::UNIX_EPOCH - time_from_epoch_abs,
+						}
+					},
+				};
+
+				// TODO: Should this be lazy-loaded?
+				let metadata = EntryMetadata {
+					modified_time,
+					size: file.size(),
+				};
+
+				(file_name, metadata)
+			};
+
+			let entry = DirEntry::new(EntrySource::Zip(Arc::new(EntrySourceZip {
+				path: Arc::clone(&path),
+				file_name,
+				metadata,
+				idx,
+				archive: Arc::clone(&zip),
+			})));
+			self.inner.lock().insert(&entry)?;
+		}
+
+		Ok(())
 	}
 
 	/// Reads a file and it's parent directory
@@ -199,4 +262,13 @@ impl ReadThread {
 
 		Ok(entry)
 	}
+}
+
+/// Attempts to open a file as an archive
+fn try_archive(path: &Path) -> Option<ZipArchive<fs::File>> {
+	// TODO: Should we ignore *all* errors here?
+	let file = fs::File::open(path).ok()?;
+	let zip = ZipArchive::new(file).ok()?;
+
+	Some(zip)
 }

@@ -28,11 +28,6 @@
 	try_trait_v2_yeet,
 	vec_peek_mut
 )]
-// Lints
-#![expect(
-	irrefutable_let_patterns,
-	reason = "Currently only one variant exists, but more will be added soon"
-)]
 
 // Modules
 mod args;
@@ -305,7 +300,7 @@ impl EguiApp {
 		//       the list and it failed to be loaded, so either way it's no
 		//       longer on the list and thus we're fine to just log and continue
 		if let Err(err) = self.dir_reader.remove(entry) {
-			tracing::warn!("Unable to remove entry {:?}: {err:?}", entry.source());
+			tracing::warn!("Unable to remove entry {:?}: {err:?}", entry.source().name());
 		}
 		self.loaded_entries.shift_remove(entry);
 	}
@@ -318,7 +313,7 @@ impl EguiApp {
 		match f(self, entry) {
 			Ok(value) => value,
 			Err(err) => {
-				tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source());
+				tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source().name());
 				self.remove_entry(entry);
 				do yeet;
 			},
@@ -1471,7 +1466,7 @@ impl eframe::App for EguiApp {
 				Ok(None) => (),
 				// If it errored, remove it from both loading and the list.
 				Err(err) => {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source());
+					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source().name());
 					let entry = self.loading_entries.swap_remove(loading_entry_idx);
 					self.remove_entry(&entry);
 				},

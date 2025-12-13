@@ -2,6 +2,7 @@
 
 // Imports
 use {
+	super::EntrySource,
 	crate::util::{
 		AppError,
 		EguiCtxLoadImage,
@@ -12,13 +13,13 @@ use {
 	},
 	app_error::Context,
 	image::{DynamicImage, ImageFormat, ImageReader},
-	std::{path::Path, sync::Arc},
+	std::{io, sync::Arc},
 	zutil_cloned::cloned,
 };
 
 #[derive(Debug)]
 struct Inner {
-	path:    Arc<Path>,
+	source:  EntrySource,
 	texture: Loadable<EntryImageTexture>,
 	format:  ImageFormat,
 }
@@ -31,10 +32,10 @@ pub struct EntryImage {
 
 impl EntryImage {
 	/// Creates a new entry image from an image
-	pub fn new(path: Arc<Path>, format: ImageFormat) -> Self {
+	pub fn new(source: EntrySource, format: ImageFormat) -> Self {
 		Self {
 			inner: Arc::new(Inner {
-				path,
+				source,
 				texture: Loadable::new(),
 				format,
 			}),
@@ -42,11 +43,11 @@ impl EntryImage {
 	}
 
 	/// Creates a loaded entry image
-	pub fn loaded(path: Arc<Path>, format: ImageFormat, egui_ctx: &egui::Context, image: DynamicImage) -> Self {
-		let texture = Self::create_texture(&path, image, egui_ctx);
+	pub fn loaded(source: EntrySource, format: ImageFormat, egui_ctx: &egui::Context, image: DynamicImage) -> Self {
+		let texture = Self::create_texture(&source, image, egui_ctx);
 		Self {
 			inner: Arc::new(Inner {
-				path,
+				source,
 				texture: Loadable::loaded(texture),
 				format,
 			}),
@@ -55,17 +56,17 @@ impl EntryImage {
 
 	/// Starts loading this image, if unloaded
 	pub fn load(&self, thread_pool: &PriorityThreadPool, egui_ctx: &egui::Context) -> Result<(), AppError> {
-		#[cloned(path = self.inner.path, format = self.inner.format, egui_ctx;)]
+		#[cloned(source = self.inner.source, format = self.inner.format, egui_ctx;)]
 		self.inner.texture.try_load(thread_pool, Priority::HIGH, move || try {
-			let image = self::open_with_format(&path, format)?;
-			Self::create_texture(&path, image, &egui_ctx)
+			let image = self::open_with_format(&source, format)?;
+			Self::create_texture(&source, image, &egui_ctx)
 		})?;
 
 		Ok(())
 	}
 
 	/// Creates the image's texture
-	fn create_texture(path: &Path, image: DynamicImage, egui_ctx: &egui::Context) -> EntryImageTexture {
+	fn create_texture(source: &EntrySource, image: DynamicImage, egui_ctx: &egui::Context) -> EntryImageTexture {
 		// Split the image if it's too big for the gpu
 		// Note: If the max texture size doesn't fit into a `u32`, then we can be sure
 		//       that any image passed will fit.
@@ -74,16 +75,16 @@ impl EntryImage {
 		if let Ok(max_texture_size) = u32::try_from(max_texture_size) &&
 			(image.width() > max_texture_size || image.height() > max_texture_size)
 		{
-			return Self::create_split_texture(path, image, egui_ctx, max_texture_size);
+			return Self::create_split_texture(source, image, egui_ctx, max_texture_size);
 		}
 
-		let handle = egui_ctx.load_image(path.display().to_string(), image);
+		let handle = egui_ctx.load_image(source.name(), image);
 		EntryImageTexture::Simple(EguiTextureHandle(handle))
 	}
 
 	/// Creates the image's texture by splitting the image
 	fn create_split_texture(
-		path: &Path,
+		source: &EntrySource,
 		mut image: DynamicImage,
 		egui_ctx: &egui::Context,
 		max_texture_size: u32,
@@ -116,7 +117,7 @@ impl EntryImage {
 				// TODO: We can be more efficient than this as cropping, especially
 				//       when our width is 1.
 				let tile_image = image.crop(x, y, width, height);
-				let handle = egui_ctx.load_image(format!("{}@{x}+{y}", path.display()), tile_image);
+				let handle = egui_ctx.load_image(format!("{}@{x}+{y}", source.name()), tile_image);
 				tiles.push(EguiTextureHandle(handle));
 			}
 		}
@@ -328,8 +329,27 @@ impl EntryImageTexture {
 
 /// Opens an image with a given format
 // TODO: Move to util.
-pub(super) fn open_with_format(path: &Path, format: ImageFormat) -> Result<image::DynamicImage, app_error::AppError> {
-	let mut image_reader = ImageReader::open(path).context("Unable to open image")?;
-	image_reader.set_format(format);
-	image_reader.decode().context("Unable to read image")
+pub(super) fn open_with_format(source: &EntrySource, format: ImageFormat) -> Result<DynamicImage, app_error::AppError> {
+	fn read_image<R: io::Seek + io::BufRead>(
+		mut image_reader: ImageReader<R>,
+		format: ImageFormat,
+	) -> Result<DynamicImage, AppError> {
+		image_reader.set_format(format);
+		image_reader.decode().context("Unable to read image")
+	}
+
+	match source {
+		EntrySource::Path(path) => {
+			let image_reader = ImageReader::open(path).context("Unable to open image")?;
+			read_image(image_reader, format)
+		},
+		EntrySource::Zip(zip) => {
+			// TODO: Could we get away without reading the whole file?
+			//       Unfortunately, `ImageReader` requires a `Seek`-able
+			//       reader, but even a buffered zip file isn't seekable.
+			let contents = zip.contents().context("Unable to read zip file contents")?;
+			let image_reader = ImageReader::new(io::Cursor::new(contents));
+			read_image(image_reader, format)
+		},
+	}
 }

@@ -8,6 +8,7 @@
 		"imageops",
 		"indexmap",
 		"indexset",
+		"mjpeg",
 		"natord",
 		"seeked",
 		"walkdir",

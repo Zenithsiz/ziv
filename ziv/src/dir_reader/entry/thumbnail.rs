@@ -27,21 +27,25 @@ impl EntryThumbnail {
 		source: &EntrySource,
 		data: &EntryData,
 	) -> Result<Self, AppError> {
-		let EntrySource::Path(entry_path) = source;
-
 		// Note: If the path is inside of the thumbnail cache, just load it to avoid recursively creating
 		//       thumbnails of thumbnails.
 		// TODO: This assumes that `thumbnails_dir` is absolute, which currently is true, but we shouldn't
 		//       rely on that. On the other hand, canonicalizing it every time would be costly.
 		// TODO: Instead of this, can we just check that the actual image is smaller than 256x256 and use it
 		//       if it is?
-		let entry_path_absolute = entry_path.canonicalize().context("Unable to canonicalize path")?;
-		let cache_path = match entry_path_absolute.starts_with(thumbnails_dir) {
-			true => entry_path.to_path_buf(),
+		let entry_path = match source {
+			EntrySource::Path(path) => path.canonicalize().context("Unable to canonicalize path")?,
+			EntrySource::Zip(zip) => {
+				let zip_path_absolute = zip.path.canonicalize().context("Unable to canonicalize zip path")?;
+				zip_path_absolute.join(&zip.file_name)
+			},
+		};
+		let cache_path = match entry_path.starts_with(thumbnails_dir) {
+			true => entry_path.clone(),
 			// Otherwise, get it's path in the cache
 			false => {
-				let path_uri = Url::from_file_path(&entry_path_absolute)
-					.map_err(|()| app_error!("Unable to turn path into url: {entry_path_absolute:?}"))?;
+				let path_uri = Url::from_file_path(&entry_path)
+					.map_err(|()| app_error!("Unable to turn path into url: {entry_path:?}"))?;
 				let path_md5 = md5::compute(path_uri.as_str());
 				// TODO: Should we be using `png`s for the thumbnails?
 				let thumbnail_file_name = format!("{path_md5:#x}.png");
@@ -53,12 +57,16 @@ impl EntryThumbnail {
 		let image = match image::open(&cache_path) {
 			Ok(image) => image,
 			Err(err) => {
-				tracing::debug!(?entry_path, ?cache_path, ?err, "No thumbnail found, generating one");
+				tracing::debug!(source=?source.name(), ?cache_path, ?err, "No thumbnail found, generating one");
 				let thumbnail = match data {
 					EntryData::Image(image) =>
-						super::image::open_with_format(entry_path, image.format())?.thumbnail(256, 256),
+						super::image::open_with_format(source, image.format())?.thumbnail(256, 256),
 					// Note: Despite `image` supporting GIFs, we create the thumbnail as a video
-					EntryData::Video(_) => self::video_thumbnail(entry_path)?,
+					EntryData::Video(_) => match source {
+						EntrySource::Path(path) => self::video_thumbnail(path)?,
+						EntrySource::Zip(_) =>
+							app_error::bail!("Thumbnails of videos inside of a zip file aren't supported yet"),
+					},
 					EntryData::Other => return Ok(Self::NonMedia),
 				};
 
@@ -69,7 +77,7 @@ impl EntryThumbnail {
 			},
 		};
 
-		let image = EntryImage::loaded(cache_path.into(), ImageFormat::Png, egui_ctx, image);
+		let image = EntryImage::loaded(EntrySource::Path(cache_path.into()), ImageFormat::Png, egui_ctx, image);
 		Ok(Self::Image(image))
 	}
 }

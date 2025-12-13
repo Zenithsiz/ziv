@@ -282,7 +282,10 @@ impl Inner {
 			let idx = match self.search(&cur_entry.entry) {
 				Ok(idx) => idx,
 				Err(err) => {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", cur_entry.source());
+					tracing::warn!(
+						"Unable to load entry {:?}, removing: {err:?}",
+						cur_entry.source().name()
+					);
 					self.cur_entry = None;
 					continue;
 				},
