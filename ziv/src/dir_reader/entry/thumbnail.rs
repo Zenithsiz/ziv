@@ -27,12 +27,6 @@ impl EntryThumbnail {
 		source: &EntrySource,
 		data: &EntryData,
 	) -> Result<Self, AppError> {
-		// Note: If the path is inside of the thumbnail cache, just load it to avoid recursively creating
-		//       thumbnails of thumbnails.
-		// TODO: This assumes that `thumbnails_dir` is absolute, which currently is true, but we shouldn't
-		//       rely on that. On the other hand, canonicalizing it every time would be costly.
-		// TODO: Instead of this, can we just check that the actual image is smaller than 256x256 and use it
-		//       if it is?
 		let entry_path = match source {
 			EntrySource::Path(path) => path.canonicalize().context("Unable to canonicalize path")?,
 			EntrySource::Zip(zip) => {
@@ -40,44 +34,65 @@ impl EntryThumbnail {
 				zip_path_absolute.join(&zip.file_name)
 			},
 		};
-		let cache_path = match entry_path.starts_with(thumbnails_dir) {
-			true => entry_path.clone(),
-			// Otherwise, get it's path in the cache
-			false => {
-				let path_uri = Url::from_file_path(&entry_path)
-					.map_err(|()| app_error!("Unable to turn path into url: {entry_path:?}"))?;
-				let path_md5 = md5::compute(path_uri.as_str());
-				// TODO: Should we be using `png`s for the thumbnails?
-				let thumbnail_file_name = format!("{path_md5:#x}.png");
+		let entry_path_uri = Url::from_file_path(&entry_path)
+			.map_err(|()| app_error!("Unable to turn path into url: {entry_path:?}"))?;
+		let entry_path_md5 = md5::compute(entry_path_uri.as_str());
+		// TODO: Should we be using `png`s for the thumbnails?
+		let thumbnail_file_name = format!("{entry_path_md5:#x}.png");
+		let thumbnail_path = thumbnails_dir.join(thumbnail_file_name);
 
-				thumbnails_dir.join(thumbnail_file_name)
-			},
-		};
-
-		let image = match image::open(&cache_path) {
-			Ok(image) => image,
-			Err(err) => {
-				tracing::debug!(source=?source.name(), ?cache_path, ?err, "No thumbnail found, generating one");
-				let thumbnail = match data {
-					EntryData::Image(image) =>
-						super::image::open_with_format(source, image.format())?.thumbnail(256, 256),
+		let (thumbnail, thumbnail_source) = match image::open(&thumbnail_path) {
+			Ok(image) => (image, EntrySource::Path(thumbnail_path.into())),
+			Err(_) => {
+				let (thumbnail, thumbnail_source) = match data {
+					EntryData::Image(image) => {
+						// If the image is thumbnail sized, just use it instead of generating a thumbnail
+						let image = super::image::open_with_format(source, image.format())?;
+						match image.width() <= 256 && image.height() <= 256 {
+							true => {
+								tracing::debug!(source = ?source.name(), "Using image itself as the thumbnail");
+								(image, source.clone())
+							},
+							false => {
+								tracing::debug!(?thumbnail_path, source = ?source.name(), "Generating thumbnail from image");
+								let thumbnail = image.thumbnail(256, 256);
+								(thumbnail, EntrySource::Path(thumbnail_path.into()))
+							},
+						}
+					},
 					// Note: Despite `image` supporting GIFs, we create the thumbnail as a video
 					EntryData::Video(_) => match source {
-						EntrySource::Path(path) => self::video_thumbnail(path)?,
+						EntrySource::Path(path) => {
+							tracing::debug!(?thumbnail_path, ?path, "Generating thumbnail from video");
+
+							let thumbnail = self::video_thumbnail(path)?;
+							(thumbnail, EntrySource::Path(thumbnail_path.into()))
+						},
 						EntrySource::Zip(_) =>
 							app_error::bail!("Thumbnails of videos inside of a zip file aren't supported yet"),
 					},
 					EntryData::Other => return Ok(Self::NonMedia),
 				};
 
-				// TODO: Make saving the thumbnail a non-fatal error
-				thumbnail.save(&cache_path).context("Unable to save thumbnail")?;
+				// If we aren't using the image itself as a thumbnail, save it
+				if let EntrySource::Path(thumbnail_path) = &thumbnail_source &&
+					let EntrySource::Path(entry_path) = source &&
+					thumbnail_path != entry_path
+				{
+					assert!(
+						thumbnail_path.starts_with(thumbnails_dir),
+						"Thumbnail path wasn't inside of thumbnail directory"
+					);
 
-				thumbnail
+					// TODO: Make saving the thumbnail a non-fatal error
+					thumbnail.save(thumbnail_path).context("Unable to save thumbnail")?;
+				}
+
+				(thumbnail, thumbnail_source)
 			},
 		};
 
-		let image = EntryImage::loaded(EntrySource::Path(cache_path.into()), ImageFormat::Png, egui_ctx, image);
+		let image = EntryImage::loaded(thumbnail_source, ImageFormat::Png, egui_ctx, thumbnail);
 		Ok(Self::Image(image))
 	}
 }
