@@ -198,6 +198,9 @@ impl DirEntry {
 /// Misc.
 impl DirEntry {
 	/// Compares two directory entries according to a sort order.
+	///
+	/// If the two are equal according to the sort order, they will
+	/// next be sorted by source.
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Result<Ordering, AppError> {
 		let cmp = match order.kind {
 			SortOrderKind::FileName => {
@@ -243,6 +246,11 @@ impl DirEntry {
 					SortOrderResolutionDir::Height => usize::cmp(&lhs.height, &rhs.height),
 				}
 			},
+		};
+
+		let cmp = match cmp {
+			Ordering::Equal => self.source().cmp(&other.source()),
+			_ => cmp,
 		};
 
 		let order = match order.reverse {
@@ -317,6 +325,26 @@ pub struct EntrySourceZip {
 	pub archive:   Arc<Mutex<ZipArchive<fs::File>>>,
 }
 
+impl PartialEq for EntrySourceZip {
+	fn eq(&self, other: &Self) -> bool {
+		self.path == other.path
+	}
+}
+
+impl Eq for EntrySourceZip {}
+
+impl PartialOrd for EntrySourceZip {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for EntrySourceZip {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.path.cmp(&other.path)
+	}
+}
+
 impl EntrySourceZip {
 	/// Accesses this file.
 	pub fn try_with_file<O>(
@@ -345,7 +373,7 @@ impl EntrySourceZip {
 }
 
 /// Entry source
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub enum EntrySource {
 	/// Filesystem path
 	Path(Arc<Path>),
