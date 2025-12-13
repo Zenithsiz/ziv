@@ -423,8 +423,9 @@ impl EguiApp {
 					write_str!(title, " ({format:?})");
 				},
 				EntryData::Video(video) => {
-					let size = video.size();
-					write_str!(title, " {}x{}", size.x, size.y);
+					if let Some([width, height]) = video.size() {
+						write_str!(title, " {width}x{height}");
+					}
 					if let Some(duration) = video.duration() {
 						write_str!(title, " ({duration:.2?})");
 					}
@@ -905,7 +906,7 @@ impl EguiApp {
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
 		self.with_entry(entry, |this, entry| try {
 			let Some(data) = entry
-				.data_load(&this.thread_pool, egui_ctx)
+				.data_load(&this.thread_pool)
 				.context("Unable to load entry data")?
 			else {
 				return Ok(());
@@ -921,7 +922,7 @@ impl EguiApp {
 						//       preloading almost anything, just the thread initializing,
 						//       we should make it so a single frame gets rendered here.
 						video.pause();
-						video.start();
+						video.start(egui_ctx.clone());
 					},
 				EntryData::Other => this.remove_entry(entry),
 			}
@@ -947,8 +948,7 @@ impl EguiApp {
 		//       calling `try_data`, because otherwise we'd potentially
 		//       miss it.
 		self.loaded_entries.insert(input.entry.clone().into());
-		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.data_load(&this.thread_pool, ui.ctx()))
-		else {
+		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.data_load(&this.thread_pool)) else {
 			ui.centered_and_justified(|ui| {
 				ui.weak("Loading...");
 			});
@@ -973,17 +973,17 @@ impl EguiApp {
 		match data {
 			EntryData::Video(video) => {
 				if !video.started() {
-					video.start();
+					video.start(ui.ctx().clone());
 				}
 
-				let image_size = video.size();
-				if image_size == egui::Vec2::ZERO {
+				let Some(handle) = video.handle() else {
 					video.resume();
 					ui.centered_and_justified(|ui| {
 						ui.weak("Loading...");
 					});
 					return output;
-				}
+				};
+				let image_size = handle.size_vec2();
 
 				// If it wasn't on-screen, start playing it and resize
 				// TODO: This isn't always what we want, if the user paused it,
@@ -1002,7 +1002,6 @@ impl EguiApp {
 					}
 				}
 
-				let handle = video.handle();
 				let draw_image = |ui: &mut egui::Ui, ui_rect: egui::Rect, uv_rect: egui::Rect| {
 					egui::Image::new(&handle).uv(uv_rect).paint_at(ui, ui_rect);
 				};
@@ -1454,7 +1453,7 @@ impl eframe::App for EguiApp {
 				break;
 			};
 
-			match entry.data_load(&self.thread_pool, ctx) {
+			match entry.data_load(&self.thread_pool) {
 				// If we successfully loaded it, remove it from loading,
 				// and remove it from the list if it's non-media.
 				Ok(Some(data)) => {

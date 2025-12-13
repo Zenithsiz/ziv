@@ -109,21 +109,17 @@ impl DirEntry {
 /// Data
 impl DirEntry {
 	/// Gets the entry's data, blocking
-	fn data_blocking(&self, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
+	fn data_blocking(&self) -> Result<EntryData, AppError> {
 		self.0
 			.data
-			.load(|| self::load_entry_data(self, egui_ctx).context("Unable to load entry data"))
+			.load(|| self::load_entry_data(self).context("Unable to load entry data"))
 	}
 
 	/// Gets the entry's data, loading it
-	pub fn data_load(
-		&self,
-		thread_pool: &PriorityThreadPool,
-		egui_ctx: &egui::Context,
-	) -> Result<Option<EntryData>, AppError> {
-		#[cloned(this = self, egui_ctx)]
+	pub fn data_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryData>, AppError> {
+		#[cloned(this = self)]
 		self.0.data.try_load(thread_pool, Priority::HIGH, move || {
-			self::load_entry_data(&this, &egui_ctx).context("Unable to load entry data")
+			self::load_entry_data(&this).context("Unable to load entry data")
 		})
 	}
 
@@ -190,7 +186,7 @@ impl DirEntry {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
 			let source = this.source();
-			let data = this.data_blocking(&egui_ctx).context("Unable to load data")?;
+			let data = this.data_blocking().context("Unable to load data")?;
 			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data).context("Unable to create thumbnail")
 		})
 	}
@@ -361,7 +357,7 @@ fn load_metadata(source: &EntrySource) -> Result<EntryMetadata, AppError> {
 	}
 }
 
-fn load_entry_data(entry: &DirEntry, egui_ctx: &egui::Context) -> Result<EntryData, AppError> {
+fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	let source = entry.source();
 	let file_name = entry.file_name().context("Entry had no file name")?;
 
@@ -383,7 +379,7 @@ fn load_entry_data(entry: &DirEntry, egui_ctx: &egui::Context) -> Result<EntryDa
 			app_error::bail!("Videos are only supported by path")
 		};
 
-		let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
+		let video = EntryVideo::new(path).context("Unable to create video")?;
 		return Ok(EntryData::Video(video));
 	}
 
@@ -445,7 +441,7 @@ fn load_entry_data(entry: &DirEntry, egui_ctx: &egui::Context) -> Result<EntryDa
 		if let Ok(input) = ffmpeg_next::format::input(&path) &&
 			!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
 		{
-			let video = EntryVideo::new(egui_ctx, path).context("Unable to create video")?;
+			let video = EntryVideo::new(path).context("Unable to create video")?;
 			return Ok(EntryData::Video(video));
 		}
 	}

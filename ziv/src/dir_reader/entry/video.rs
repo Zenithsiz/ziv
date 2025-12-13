@@ -27,7 +27,7 @@ pub enum PlayingStatus {
 
 #[derive(Debug)]
 struct State {
-	path:           Arc<Path>,
+	texture_handle: Option<EguiTextureHandle>,
 	thread_status:  DecoderThreadStatus,
 	onscreen:       bool,
 	playing_status: PlayingStatus,
@@ -39,10 +39,9 @@ struct State {
 
 #[derive(Debug)]
 struct Inner {
-	// TODO: Should this be optional?
-	texture_handle: EguiTextureHandle,
-	state:          Mutex<State>,
-	condvar:        Condvar,
+	path:    Arc<Path>,
+	state:   Mutex<State>,
+	condvar: Condvar,
 }
 
 /// Entry video
@@ -54,46 +53,38 @@ pub struct EntryVideo {
 impl EntryVideo {
 	/// Creates a new video, not playing
 	#[expect(clippy::unnecessary_wraps, reason = "We'll be fallible eventually")]
-	pub fn new(egui_ctx: &egui::Context, path: Arc<Path>) -> Result<Self, AppError> {
-		// TODO: This filter should be customizable
-		let options = egui::TextureOptions::LINEAR;
-		let texture_handle = egui_ctx.load_texture(
-			path.display().to_string(),
-			egui::ColorImage::filled([0, 0], egui::Color32::BLACK),
-			options,
-		);
-
+	pub fn new(path: Arc<Path>) -> Result<Self, AppError> {
 		let inner = Arc::new(Inner {
-			texture_handle: EguiTextureHandle(texture_handle),
-			state:          Mutex::new(State {
-				path,
-				thread_status: DecoderThreadStatus::Stopped,
-				onscreen: false,
+			path,
+			state: Mutex::new(State {
+				texture_handle: None,
+				thread_status:  DecoderThreadStatus::Stopped,
+				onscreen:       false,
 				playing_status: PlayingStatus::Playing,
-				duration: None,
-				start_time: None,
-				cur_time: Duration::ZERO,
-				seek_to: None,
+				duration:       None,
+				start_time:     None,
+				cur_time:       Duration::ZERO,
+				seek_to:        None,
 			}),
-			condvar:        Condvar::new(),
+			condvar: Condvar::new(),
 		});
 
 		Ok(Self { inner })
 	}
 
 	/// Starts the video
-	pub fn start(&self) {
+	pub fn start(&self, egui_ctx: egui::Context) {
 		let mut state = self.inner.state.lock();
 		if !matches!(state.thread_status, DecoderThreadStatus::Stopped) {
 			return;
 		}
 		state.thread_status = DecoderThreadStatus::Started;
 
-		#[cloned(path = state.path, inner = self.inner;)]
+		#[cloned(inner = self.inner;)]
 		let _ = thread::spawn(move || {
 			let res: Result<_, AppError> = try {
-				let mut thread = DecoderThread::new(inner, &path)?;
-				thread.run()?
+				let mut thread = DecoderThread::new(inner)?;
+				thread.run(&egui_ctx)?
 			};
 
 			match res {
@@ -108,6 +99,7 @@ impl EntryVideo {
 		let mut state = self.inner.state.lock();
 		if matches!(state.thread_status, DecoderThreadStatus::Started) {
 			state.thread_status = DecoderThreadStatus::Stopping;
+			state.texture_handle = None;
 			drop(state);
 			self.inner.condvar.notify_one();
 		}
@@ -119,13 +111,18 @@ impl EntryVideo {
 	}
 
 	/// Returns the size of the video
-	pub fn size(&self) -> egui::Vec2 {
-		self.inner.texture_handle.size_vec2()
+	pub fn size(&self) -> Option<[usize; 2]> {
+		self.inner
+			.state
+			.lock()
+			.texture_handle
+			.as_ref()
+			.map(|handle| handle.size())
 	}
 
 	/// Returns the handle
-	pub fn handle(&self) -> EguiTextureHandle {
-		self.inner.texture_handle.clone()
+	pub fn handle(&self) -> Option<EguiTextureHandle> {
+		self.inner.state.lock().texture_handle.clone()
 	}
 
 	/// Sets this video as on-screen.
@@ -213,7 +210,8 @@ impl EntryVideo {
 }
 
 struct DecoderThread {
-	inner:   Arc<Inner>,
+	inner: Arc<Inner>,
+
 	input:   ffmpeg_next::format::context::Input,
 	decoder: ffmpeg_next::decoder::Video,
 	scaler:  ffmpeg_next::software::scaling::context::Context,
@@ -229,9 +227,9 @@ struct DecoderThread {
 )]
 impl DecoderThread {
 	/// Creates the decoder thread state
-	fn new(inner: Arc<Inner>, path: &Path) -> Result<Self, AppError> {
+	fn new(inner: Arc<Inner>) -> Result<Self, AppError> {
 		// Open the input
-		let input = ffmpeg_next::format::input(path).context("Unable to open video")?;
+		let input = ffmpeg_next::format::input(&inner.path).context("Unable to open video")?;
 
 		// Get the video stream
 		let video_stream = input
@@ -276,7 +274,7 @@ impl DecoderThread {
 	}
 
 	/// Runs the thread
-	fn run(&mut self) -> Result<(), AppError> {
+	fn run(&mut self, egui_ctx: &egui::Context) -> Result<(), AppError> {
 		// Note: This loop plays the video, rewinding once it reaches the end
 		loop {
 			// Note: This loops reads the packets and frames until eof
@@ -297,7 +295,7 @@ impl DecoderThread {
 				self.decoder
 					.send_packet(&packet)
 					.context("Unable to send packet to decoder")?;
-				match self.receive_frames()? {
+				match self.receive_frames(egui_ctx)? {
 					// If we seeked, we can just go back to getting packets
 					FrameRes::Seeked => continue,
 					FrameRes::DecoderWaitPacket => continue,
@@ -308,7 +306,7 @@ impl DecoderThread {
 			// After reaching eof, send it to the decoder,
 			// and receive any remaining frames
 			self.decoder.send_eof().context("Unable to send eof to decoder")?;
-			match self.receive_frames()? {
+			match self.receive_frames(egui_ctx)? {
 				// If we seeked, just continue getting frames again
 				FrameRes::Seeked => continue,
 				FrameRes::DecoderWaitPacket => unreachable!("Decoder was expected frames after EOF"),
@@ -318,7 +316,7 @@ impl DecoderThread {
 		}
 	}
 
-	fn receive_frames(&mut self) -> TryControlFlow<FrameRes, (), AppError> {
+	fn receive_frames(&mut self, egui_ctx: &egui::Context) -> TryControlFlow<FrameRes, (), AppError> {
 		let mut frame_raw = ffmpeg_next::frame::Video::empty();
 		loop {
 			// Wait until we're unpaused.
@@ -411,7 +409,14 @@ impl DecoderThread {
 
 			// TODO: This filter should be customizable
 			let options = egui::TextureOptions::LINEAR;
-			self.inner.texture_handle.clone().set(image, options);
+			let handle = self.inner.state.lock().texture_handle.clone();
+			match handle {
+				Some(mut handle) => handle.set(image, options),
+				None => {
+					let handle = egui_ctx.load_texture(self.inner.path.display().to_string(), image, options);
+					self.inner.state.lock().texture_handle = Some(EguiTextureHandle(handle));
+				},
+			}
 
 			let mut state = self.inner.state.lock();
 			if let PlayingStatus::Seeking { presented, .. } = &mut state.playing_status {
