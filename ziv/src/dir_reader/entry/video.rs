@@ -2,7 +2,16 @@
 
 // Imports
 use {
-	crate::util::{AppError, EguiTextureHandle, InstantSaturatingOps, TryControlFlow},
+	super::EntryResolution,
+	crate::util::{
+		AppError,
+		EguiTextureHandle,
+		InstantSaturatingOps,
+		Loadable,
+		PriorityThreadPool,
+		TryControlFlow,
+		priority_thread_pool::Priority,
+	},
 	app_error::Context,
 	core::{mem, time::Duration},
 	ffmpeg_next::Rescale,
@@ -39,9 +48,10 @@ struct State {
 
 #[derive(Debug)]
 struct Inner {
-	path:    Arc<Path>,
-	state:   Mutex<State>,
-	condvar: Condvar,
+	path:       Arc<Path>,
+	resolution: Loadable<EntryResolution>,
+	state:      Mutex<State>,
+	condvar:    Condvar,
 }
 
 /// Entry video
@@ -56,6 +66,7 @@ impl EntryVideo {
 	pub fn new(path: Arc<Path>) -> Result<Self, AppError> {
 		let inner = Arc::new(Inner {
 			path,
+			resolution: Loadable::new(),
 			state: Mutex::new(State {
 				texture_handle: None,
 				thread_status:  DecoderThreadStatus::Stopped,
@@ -108,6 +119,35 @@ impl EntryVideo {
 	/// Returns whether the video is started
 	pub fn started(&self) -> bool {
 		matches!(self.inner.state.lock().thread_status, DecoderThreadStatus::Started)
+	}
+
+	/// Gets this image's resolution, loading it, if unloaded
+	pub fn resolution_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryResolution>, AppError> {
+		#[cloned(this = self)]
+		self.inner.resolution.try_load(thread_pool, Priority::DEFAULT, move || {
+			match this.size() {
+				Some([width, height]) => Ok(EntryResolution { width, height }),
+				None => {
+					let input = ffmpeg_next::format::input(&this.inner.path).context("Unable to open video")?;
+					let video_stream = input
+						.streams()
+						.best(ffmpeg_next::media::Type::Video)
+						.context("No video streams found")?;
+
+					// TODO: Do we actually have to create a decoder to get the dimensions?
+					let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
+						.context("Unable to build decoder")?;
+					let decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
+
+					let width = decoder.width();
+					let height = decoder.height();
+					Ok(EntryResolution {
+						width:  width as usize,
+						height: height as usize,
+					})
+				},
+			}
+		})
 	}
 
 	/// Returns the size of the video

@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::EntrySource,
+	super::{EntryResolution, EntrySource},
 	crate::util::{
 		AppError,
 		EguiCtxLoadImage,
@@ -19,9 +19,10 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	source:  EntrySource,
-	texture: Loadable<EntryImageTexture>,
-	format:  ImageFormat,
+	source:     EntrySource,
+	texture:    Loadable<EntryImageTexture>,
+	resolution: Loadable<EntryResolution>,
+	format:     ImageFormat,
 }
 
 /// Entry image
@@ -37,6 +38,7 @@ impl EntryImage {
 			inner: Arc::new(Inner {
 				source,
 				texture: Loadable::new(),
+				resolution: Loadable::new(),
 				format,
 			}),
 		}
@@ -45,10 +47,14 @@ impl EntryImage {
 	/// Creates a loaded entry image
 	pub fn loaded(source: EntrySource, format: ImageFormat, egui_ctx: &egui::Context, image: DynamicImage) -> Self {
 		let texture = Self::create_texture(&source, image, egui_ctx);
+
+		let [width, height] = texture.size();
+		let resolution = EntryResolution { width, height };
 		Self {
 			inner: Arc::new(Inner {
 				source,
 				texture: Loadable::loaded(texture),
+				resolution: Loadable::loaded(resolution),
 				format,
 			}),
 		}
@@ -63,6 +69,47 @@ impl EntryImage {
 		})?;
 
 		Ok(())
+	}
+
+	/// Gets this image's resolution, loading it, if unloaded
+	pub fn resolution_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryResolution>, AppError> {
+		#[cloned(this = self)]
+		self.inner.resolution.try_load(thread_pool, Priority::DEFAULT, move || {
+			match this.texture()? {
+				Some(texture) => {
+					let [width, height] = texture.size();
+					Ok(EntryResolution { width, height })
+				},
+				None => {
+					fn get_resolution<R: io::Seek + io::BufRead>(
+						mut image_reader: ImageReader<R>,
+						format: ImageFormat,
+					) -> Result<EntryResolution, AppError> {
+						image_reader.set_format(format);
+						let (width, height) = image_reader.into_dimensions().context("Unable to read image")?;
+						Ok(EntryResolution {
+							width:  width as usize,
+							height: height as usize,
+						})
+					}
+
+					match &this.inner.source {
+						EntrySource::Path(path) => {
+							let image_reader = ImageReader::open(path).context("Unable to open image")?;
+							get_resolution(image_reader, this.format())
+						},
+						EntrySource::Zip(zip) => {
+							// TODO: Could we get away without reading the whole file?
+							//       Unfortunately, `ImageReader` requires a `Seek`-able
+							//       reader, but even a buffered zip file isn't seekable.
+							let contents = zip.contents().context("Unable to read zip file contents")?;
+							let image_reader = ImageReader::new(io::Cursor::new(contents));
+							get_resolution(image_reader, this.format())
+						},
+					}
+				},
+			}
+		})
 	}
 
 	/// Creates the image's texture
