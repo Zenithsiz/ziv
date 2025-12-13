@@ -121,33 +121,48 @@ impl EntryVideo {
 		matches!(self.inner.state.lock().thread_status, DecoderThreadStatus::Started)
 	}
 
-	/// Gets this image's resolution, loading it, if unloaded
+	/// Loads the resolution of a video
+	fn load_resolution(&self) -> Result<EntryResolution, app_error::AppError> {
+		match self.size() {
+			Some([width, height]) => Ok(EntryResolution { width, height }),
+			None => {
+				let input = ffmpeg_next::format::input(&self.inner.path).context("Unable to open video")?;
+				let video_stream = input
+					.streams()
+					.best(ffmpeg_next::media::Type::Video)
+					.context("No video streams found")?;
+
+				// TODO: Do we actually have to create a decoder to get the dimensions?
+				let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
+					.context("Unable to build decoder")?;
+				let decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
+
+				let width = decoder.width();
+				let height = decoder.height();
+				Ok(EntryResolution {
+					width:  width as usize,
+					height: height as usize,
+				})
+			},
+		}
+	}
+
+	/// Gets this video's resolution, blocking
+	pub fn _resolution_blocking(&self) -> Result<EntryResolution, AppError> {
+		self.inner.resolution.load(move || self.load_resolution())
+	}
+
+	/// Gets this video's resolution, loading it
 	pub fn resolution_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryResolution>, AppError> {
 		#[cloned(this = self)]
-		self.inner.resolution.try_load(thread_pool, Priority::DEFAULT, move || {
-			match this.size() {
-				Some([width, height]) => Ok(EntryResolution { width, height }),
-				None => {
-					let input = ffmpeg_next::format::input(&this.inner.path).context("Unable to open video")?;
-					let video_stream = input
-						.streams()
-						.best(ffmpeg_next::media::Type::Video)
-						.context("No video streams found")?;
+		self.inner
+			.resolution
+			.try_load(thread_pool, Priority::DEFAULT, move || this.load_resolution())
+	}
 
-					// TODO: Do we actually have to create a decoder to get the dimensions?
-					let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
-						.context("Unable to build decoder")?;
-					let decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
-
-					let width = decoder.width();
-					let height = decoder.height();
-					Ok(EntryResolution {
-						width:  width as usize,
-						height: height as usize,
-					})
-				},
-			}
-		})
+	/// Gets this video's resolution, if loaded
+	pub fn _resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
+		self.inner.resolution.try_get()
 	}
 
 	/// Returns the size of the video
