@@ -30,7 +30,7 @@ impl EntrySource {
 	pub fn name(&self) -> String {
 		match self {
 			Self::Path(path) => path.display().to_string(),
-			Self::Zip(zip) => zip.path.join(&zip.file_name).display().to_string(),
+			Self::Zip(zip) => zip.archive_path.join(&zip.file_name).display().to_string(),
 		}
 	}
 }
@@ -38,18 +38,20 @@ impl EntrySource {
 /// Entry source from a zip file
 #[derive(Clone, Debug)]
 pub struct EntrySourceZip {
-	pub path:      Arc<Path>,
-	pub file_name: PathBuf,
-	pub metadata:  EntryMetadata,
-	pub idx:       usize,
+	// Note: This is the path of the zip file that we're contained in.
+	archive_path: Arc<Path>,
+
+	file_name: PathBuf,
+	metadata:  EntryMetadata,
+	idx:       usize,
 
 	// TODO: Should we move this elsewhere to avoid every entry storing it?
-	pub archive: Arc<Mutex<ZipArchive<fs::File>>>,
+	archive: Arc<Mutex<ZipArchive<fs::File>>>,
 }
 
 impl PartialEq for EntrySourceZip {
 	fn eq(&self, other: &Self) -> bool {
-		self.path == other.path
+		self.archive_path == other.archive_path
 	}
 }
 
@@ -63,11 +65,28 @@ impl PartialOrd for EntrySourceZip {
 
 impl Ord for EntrySourceZip {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.path.cmp(&other.path)
+		self.archive_path.cmp(&other.archive_path)
 	}
 }
 
 impl EntrySourceZip {
+	/// Creates a new zip source
+	pub const fn new(
+		zip_path: Arc<Path>,
+		file_name: PathBuf,
+		metadata: EntryMetadata,
+		idx: usize,
+		archive: Arc<Mutex<ZipArchive<fs::File>>>,
+	) -> Self {
+		Self {
+			archive_path: zip_path,
+			file_name,
+			metadata,
+			idx,
+			archive,
+		}
+	}
+
 	/// Accesses this file.
 	pub fn try_with_file<O>(
 		&self,
@@ -91,5 +110,20 @@ impl EntrySourceZip {
 	/// Returns if the entry is a directory
 	pub fn is_dir(&self) -> Result<bool, AppError> {
 		self.try_with_file(|file| Ok(file.is_dir()))
+	}
+
+	/// Returns this entry's archive path
+	pub fn archive_path(&self) -> &Path {
+		&self.archive_path
+	}
+
+	/// Returns the entry's file name
+	pub fn file_name(&self) -> &Path {
+		&self.file_name
+	}
+
+	/// Returns the entry's metadata
+	pub const fn metadata(&self) -> &EntryMetadata {
+		&self.metadata
 	}
 }

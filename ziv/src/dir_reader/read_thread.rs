@@ -111,13 +111,8 @@ impl ReadThread {
 				(file_name, metadata)
 			};
 
-			let entry = DirEntry::new(EntrySource::Zip(Arc::new(EntrySourceZip {
-				path: Arc::clone(&path),
-				file_name,
-				metadata,
-				idx,
-				archive: Arc::clone(&zip),
-			})));
+			let zip = EntrySourceZip::new(Arc::clone(&path), file_name, metadata, idx, Arc::clone(&zip));
+			let entry = DirEntry::new(EntrySource::Zip(Arc::new(zip)));
 			self.inner.lock().insert(&entry)?;
 		}
 

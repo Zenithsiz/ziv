@@ -81,7 +81,7 @@ impl DirEntry {
 		let source = self.source();
 		match source {
 			EntrySource::Path(path) => path.file_name().context("Missing file name").map(PathBuf::from),
-			EntrySource::Zip(zip) => Ok(zip.file_name.clone()),
+			EntrySource::Zip(zip) => Ok(zip.file_name().to_owned()),
 		}
 	}
 }
@@ -350,7 +350,7 @@ fn load_metadata(source: &EntrySource) -> Result<EntryMetadata, AppError> {
 			let metadata = fs::metadata(path).context("Unable to get metadata")?;
 			EntryMetadata::from_file(&metadata)
 		},
-		EntrySource::Zip(zip) => Ok(zip.metadata.clone()),
+		EntrySource::Zip(zip) => Ok(zip.metadata().clone()),
 	}
 }
 

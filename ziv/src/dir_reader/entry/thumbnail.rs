@@ -30,8 +30,11 @@ impl EntryThumbnail {
 		let entry_path = match source {
 			EntrySource::Path(path) => path.canonicalize().context("Unable to canonicalize path")?,
 			EntrySource::Zip(zip) => {
-				let zip_path_absolute = zip.path.canonicalize().context("Unable to canonicalize zip path")?;
-				zip_path_absolute.join(&zip.file_name)
+				let zip_path_absolute = zip
+					.archive_path()
+					.canonicalize()
+					.context("Unable to canonicalize zip path")?;
+				zip_path_absolute.join(zip.file_name())
 			},
 		};
 		let entry_path_uri = Url::from_file_path(&entry_path)
