@@ -168,6 +168,9 @@ impl ReadThread {
 				continue;
 			}
 
+			// TODO: On windows, we get the metadata with the directory for free,
+			//       so we should pass it along to `read_path` to set it on the
+			//       entry, avoiding a re-reading it later on.
 			if let Err(err) = self.read_path(entry_path) {
 				tracing::warn!("Unable to read directory entry {entry_path:?}: {err:?}");
 			}
