@@ -1314,27 +1314,36 @@ impl EguiApp {
 		egui::CentralPanel::default().frame(bg_frame).show(ctx, |ui| {
 			let total_entries = self.dir_reader.len();
 			let entry_rows = total_entries.div_ceil(self.entries_per_row);
-			let image_height = ui.available_width() / self.entries_per_row as f32;
 
-			// TODO: Not have to manually calculate this
+			// TODO: Not calculate all this manually
+			let row_size = egui::vec2(ui.available_width(), ui.available_width() / self.entries_per_row as f32);
+			let cell_size = egui::vec2(row_size.x / self.entries_per_row as f32, row_size.y);
+			let cell_frame = egui::Frame::NONE
+				.inner_margin(5)
+				.outer_margin(10)
+				.stroke(egui::Stroke::new(1.0, egui::Color32::TRANSPARENT))
+				.fill(egui::Color32::from_rgba_premultiplied(0x10, 0x10, 0x10, 0xff))
+				.corner_radius(2);
+			let frame_size = cell_size - cell_frame.total_margin().sum();
 			let text_body_height = ui.text_style_height(&egui::TextStyle::Body);
-			let row_height = ui.available_width() / self.entries_per_row as f32 +
-				text_body_height +
-				10.0 * 2.0 + 5.0 * 2.0 +
-				1.0 * 2.0;
+			let image_size = frame_size - egui::vec2(0.0, text_body_height);
+
+			// If we're too small, don't draw anything
+			// TODO: We should probably do something to ensure this doesn't happen...
+			//       Maybe use relative sizes for the cell frame, although that doesn't fix
+			//       the text body height being non-relative.
+			if frame_size.x < 0.0 || frame_size.y < 0.0 || image_size.x < 0.0 || image_size.y < 0.0 {
+				return;
+			}
 
 			egui::ScrollArea::vertical()
 				.auto_shrink(false)
-				.show_rows(ui, row_height, entry_rows, |ui, rows| {
-					let row_width = ui.available_width();
-					let cell_width = row_width / self.entries_per_row as f32;
-					let cell_height = row_height;
-
+				.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
 					egui::Grid::new("display-list-entries")
 						.num_columns(self.entries_per_row)
-						.min_row_height(cell_height)
-						.min_col_width(cell_width)
-						.max_col_width(cell_width)
+						.min_row_height(cell_size.y)
+						.min_col_width(cell_size.x)
+						.max_col_width(cell_size.x)
 						.start_row(rows.start)
 						.spacing([0.0, 0.0])
 						.show(ui, |ui| {
@@ -1353,21 +1362,11 @@ impl EguiApp {
 										true => egui::Color32::from_rgba_premultiplied(0xd0, 0xd0, 0xd0, 0xff),
 										false => egui::Color32::TRANSPARENT,
 									};
+									let cell_frame =
+										cell_frame.stroke(egui::Stroke::new(cell_frame.stroke.width, stroke_color));
 
-									let frame = egui::Frame::NONE
-										.inner_margin(5)
-										.outer_margin(10)
-										.stroke(egui::Stroke::new(1.0, stroke_color))
-										.fill(egui::Color32::from_rgba_premultiplied(0x10, 0x10, 0x10, 0xff))
-										.corner_radius(2);
-
-									let frame_res = frame.show(ui, |ui| {
-										ui.take_available_space();
-
-										let image_width = ui.available_width();
-										let image_size = egui::vec2(image_width, image_height);
-
-										ui.vertical_centered_justified(|ui| {
+									let frame_res = cell_frame.show(ui, |ui| {
+										ui.vertical(|ui| {
 											enum Thumbnail {
 												Image(EntryImageTexture),
 												NonMedia,
@@ -1393,54 +1392,51 @@ impl EguiApp {
 												// TODO: Not have to manually paint the texture?
 												Some(Thumbnail::Image(texture)) => {
 													let texture_size = texture.size_vec2();
-													let aspect_ratio = match texture_size.y > texture_size.x {
-														true => egui::vec2(texture_size.x / texture_size.y, 1.0),
-														false => egui::vec2(1.0, texture_size.y / texture_size.x),
+
+													let image_as = image_size.y / image_size.x;
+													let texture_as = texture_size.y / texture_size.x;
+
+													let width_ratio = image_size.x / texture_size.x;
+													let height_ratio = image_size.y / texture_size.y;
+
+													let x_ratio = height_ratio / width_ratio;
+													let y_ratio = width_ratio / height_ratio;
+
+													let aspect_ratio = match image_as > texture_as {
+														true => egui::vec2(1.0, y_ratio),
+														false => egui::vec2(x_ratio, 1.0),
 													};
 
 													let uv_rect =
 														egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE);
 
-													// TODO: Why is the next widget position offset?
-													let ui_pos =
-														ui.next_widget_position() + egui::vec2(0.0, image_size.y / 2.0);
-													let ui_rect =
-														egui::Rect::from_center_size(ui_pos, image_size * aspect_ratio);
+													let ui_center_pos = ui.next_widget_position() + image_size / 2.0;
+													let ui_size = image_size * aspect_ratio;
+
+													let ui_rect = egui::Rect::from_center_size(ui_center_pos, ui_size);
 
 													texture.paint_at(ui, uv_rect, ui_rect);
 												},
 												Some(Thumbnail::NonMedia) => self.remove_entry(&entry),
 												None => (),
 											}
-											let response = ui.allocate_response(image_size, egui::Sense::click());
 
+											let response = ui.allocate_response(image_size, egui::Sense::click());
 											if response.double_clicked() {
 												goto_entry = Some(entry.clone());
 											}
 
-											let file_name_height_id = egui::Id::new(("display-list-hover", &entry));
-											let file_name_height =
-												ui.data(|data| data.get_temp(file_name_height_id)).unwrap_or(0.0);
-
-											let spacing = ui.available_height() - file_name_height;
-											if spacing > 0.0 {
-												let response = ui.allocate_response(
-													egui::vec2(ui.available_width(), spacing),
-													egui::Sense::click(),
-												);
-
-												if response.double_clicked() {
-													goto_entry = Some(entry.clone());
-												}
-											}
-
 											if let Ok(file_name) = entry.file_name() {
-												let label = egui::Label::new(file_name.display().to_string())
-													.wrap_mode(egui::TextWrapMode::Truncate);
+												ui.centered_and_justified(|ui| {
+													let response = egui::Label::new(file_name.display().to_string())
+														.wrap_mode(egui::TextWrapMode::Truncate)
+														.ui(ui);
 
-												let response = ui.add(label);
-												ui.data_mut(|data| {
-													data.insert_temp(file_name_height_id, response.rect.height());
+													// TODO: Should a double click on the text actually enter the image?
+													//       Maybe the user just wants to select it all.
+													if response.double_clicked() {
+														goto_entry = Some(entry.clone());
+													}
 												});
 											}
 										});
@@ -1448,6 +1444,7 @@ impl EguiApp {
 
 									ui.data_mut(|data| data.insert_temp(hovered_id, frame_res.response.hovered()));
 								}
+
 								ui.end_row();
 							}
 						});
