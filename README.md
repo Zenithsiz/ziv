@@ -32,9 +32,15 @@ Images taken from an arch kde `plasma-workspace` installation in `/usr/share/pla
 
 See [`config.toml`](config.toml) for the default configuration, including all shortcuts
 
-## Installation
+## Installations
 
-[//]: <> (TODO: Add more installation methods, including ones with desktop files)
+### Arch
+
+For arch users, a `PKGBUILD` is available on the [`pkgbuild` branch](https://github.com/Zenithsiz/ziv/tree/pkgbuild)
+
+### Debian
+
+For debian users, `.deb` packages are included in the github releases
 
 ### `crates.io`
 
@@ -45,10 +51,6 @@ cargo install ziv
 ```
 
 Note that this will only install the binary itself, without any desktop support.
-
-### Github
-
-Github releases are also provided in the form of standalone binaries
 
 ### Building from source
 
