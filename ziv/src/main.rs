@@ -1305,6 +1305,10 @@ impl EguiApp {
 						.clamping(egui::SliderClamping::Never)
 						.ui(ui)
 				});
+
+				if self.entries_per_row == 0 {
+					self.entries_per_row = 1;
+				}
 			});
 
 		egui::CentralPanel::default().frame(bg_frame).show(ctx, |ui| {
