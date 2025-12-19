@@ -3,6 +3,7 @@ edition     = { workspace = true }
 name        = "ziv"
 description = { workspace = true }
 license     = { workspace = true }
+authors     = { workspace = true }
 version     = { workspace = true }
 repository  = { workspace = true }
 

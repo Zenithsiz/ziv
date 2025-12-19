@@ -4,6 +4,7 @@ members  = ["ziv"]
 resolver = "2"
 
 [workspace.package]
+authors     = ["filipejacintorodrigues1@gmail.com"]
 description = "Zenithsiz's image viewer"
 edition     = "2024"
 license     = "MIT OR Apache-2.0"
