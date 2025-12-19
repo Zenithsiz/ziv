@@ -8,7 +8,10 @@ version     = { workspace = true }
 repository  = { workspace = true }
 
 [package.metadata.deb]
-assets = [{ source = "../install/ziv.desktop", dest = "/usr/share/applications/ziv.desktop", mode = "644" }]
+assets = [
+	{ source = "target/release/ziv", dest = "usr/bin/", mode = "755" },
+	{ source = "../install/ziv.desktop", dest = "usr/share/applications/ziv.desktop", mode = "644" },
+]
 
 [dependencies]
 
