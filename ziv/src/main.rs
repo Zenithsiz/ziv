@@ -1300,8 +1300,10 @@ impl EguiApp {
 				self.draw_info_window(ctx, None);
 
 				ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-					egui::Slider::new(&mut self.entries_per_row, 1..=10).ui(ui);
-					ui.label("Columns: ");
+					egui::Slider::new(&mut self.entries_per_row, 1..=10)
+						.text("Columns")
+						.clamping(egui::SliderClamping::Never)
+						.ui(ui)
 				});
 			});
 
