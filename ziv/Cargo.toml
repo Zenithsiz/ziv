@@ -7,6 +7,9 @@ authors     = { workspace = true }
 version     = { workspace = true }
 repository  = { workspace = true }
 
+[package.metadata.deb]
+assets = [{ source = "../install/ziv.desktop", dest = "/usr/share/applications/ziv.desktop", mode = "644" }]
+
 [dependencies]
 
 app-error             = { workspace = true }

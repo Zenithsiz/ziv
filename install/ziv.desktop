@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=0.1.0
+Name=Ziv
+GenericName=Image Viewer
+Comment=Zenithsiz's image viewer
+Exec=/usr/bin/ziv %f
+Terminal=false
+Type=Application
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;image/gif;image/bmp;image/webp;video/webm;video/mp4;
+Keywords=image;view;ziv;picture;gif;jpeg;webm;
