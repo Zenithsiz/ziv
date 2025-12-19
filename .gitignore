@@ -4,3 +4,9 @@ target
 # Logs
 *.log
 logs
+
+# makepkg
+src/ziv-*
+pkg/
+ziv-*.tar.zst
+ziv-*.tar.gz
