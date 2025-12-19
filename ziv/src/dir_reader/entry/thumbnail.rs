@@ -122,6 +122,10 @@ pub fn video_thumbnail(path: &Path) -> Result<DynamicImage, AppError> {
 	// And a scaler
 	let [input_width, input_height] = [decoder.width(), decoder.height()];
 	app_error::ensure!(
+		decoder.format() != ffmpeg_next::format::Pixel::None,
+		"Video format was missing"
+	);
+	app_error::ensure!(
 		input_width != 0 && input_height != 0,
 		"Video size was 0: {input_width}x{input_height}"
 	);

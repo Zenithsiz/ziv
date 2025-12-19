@@ -310,6 +310,14 @@ impl DecoderThread {
 		let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
 			.context("Unable to build decoder")?;
 		let decoder = decoder_ctx.decoder().video().context("Unable to get video decoder")?;
+		app_error::ensure!(
+			decoder.format() != ffmpeg_next::format::Pixel::None,
+			"Decoder found no format"
+		);
+		app_error::ensure!(
+			decoder.width() != 0 && decoder.height() != 0,
+			"Decoder found a 0-sized video"
+		);
 
 		// And a scaler
 		let scaler = ffmpeg_next::software::scaling::context::Context::get(
