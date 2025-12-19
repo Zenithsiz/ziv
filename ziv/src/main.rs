@@ -1149,7 +1149,11 @@ impl EguiApp {
 
 		self.draw_info_window(ctx, Some(&cur_entry));
 
-		let panel_output = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+		let panel_frame = egui::Frame {
+			fill: egui::Color32::BLACK,
+			..egui::Frame::NONE
+		};
+		let panel_output = egui::CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
 			let window_response = ui.interact(
 				egui::Rect::from_min_size(egui::Pos2::ZERO, ui.available_size()),
 				egui::Id::new("whole-screen"),
@@ -1285,9 +1289,13 @@ impl EguiApp {
 			video.pause();
 		}
 
+		let bg_frame = egui::Frame {
+			fill: egui::Color32::BLACK,
+			..egui::Frame::NONE
+		};
 		egui::TopBottomPanel::top("display-list-controls")
 			.show_separator_line(false)
-			.frame(egui::Frame::NONE)
+			.frame(bg_frame)
 			.show(ctx, |ui| {
 				self.draw_info_window(ctx, None);
 
@@ -1297,7 +1305,7 @@ impl EguiApp {
 				});
 			});
 
-		egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+		egui::CentralPanel::default().frame(bg_frame).show(ctx, |ui| {
 			let total_entries = self.dir_reader.len();
 			let entry_rows = total_entries.div_ceil(self.entries_per_row);
 			let image_height = ui.available_width() / self.entries_per_row as f32;
