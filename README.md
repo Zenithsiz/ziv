@@ -12,6 +12,8 @@ Heavily inspired by [qimgv](http://github.com/easymodo/qimgv)
 
 - Directory view
 
+- Open archives as directories (currently only `zip`s are supported)
+
 - Fast startup
 
 - User interface never blocks on IO, making it snappy even while loading
