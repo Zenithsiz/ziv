@@ -7,7 +7,7 @@ use {
 		DirEntry,
 		entry::{EntryMetadata, EntrySource, EntrySourceZip},
 	},
-	crate::util::AppError,
+	crate::{dir_reader::entry::EntryFileType, util::AppError},
 	app_error::Context,
 	core::time::Duration,
 	parking_lot::Mutex,
@@ -73,7 +73,7 @@ impl ReadThread {
 		let files_len = zip.len();
 		let zip = Arc::new(Mutex::new(zip));
 		for idx in 0..files_len {
-			let (file_name, metadata) = {
+			let (file_name, metadata, file_type) = {
 				let mut zip = zip.lock();
 				// TODO: `by_index_raw` also seeks the inner reader,
 				//       which theoretically shouldn't perform any
@@ -81,6 +81,11 @@ impl ReadThread {
 				let file = zip.by_index_raw(idx).context("Unable to get file")?;
 
 				let file_name = file.enclosed_name().context("File name wasn't enclosed")?;
+				let file_type = match &file {
+					_ if file.is_dir() => EntryFileType::Directory,
+					_ if file.is_symlink() => EntryFileType::Symlink,
+					_ => EntryFileType::File,
+				};
 
 				let modified_time_secs_from_epoch = file.extra_data_fields().find_map(|field| match field {
 					zip::ExtraField::ExtendedTimestamp(timestamp) => timestamp.mod_time(),
@@ -108,11 +113,11 @@ impl ReadThread {
 					size: file.size(),
 				};
 
-				(file_name, metadata)
+				(file_name, metadata, file_type)
 			};
 
 			let zip = EntrySourceZip::new(Arc::clone(&path), file_name, metadata, idx, Arc::clone(&zip));
-			let entry = DirEntry::new(EntrySource::Zip(Arc::new(zip)));
+			let entry = DirEntry::new(EntrySource::Zip(Arc::new(zip)), file_type);
 			self.inner.lock().insert(&entry)?;
 		}
 
@@ -122,9 +127,10 @@ impl ReadThread {
 	/// Reads a file and it's parent directory
 	fn read_file_and_parent(&self, path: &Path, file_metadata: &fs::Metadata) -> Result<(), AppError> {
 		// Read the specified entry first, add it and set it as the current entry.
-		let entry = self.read_path(path).context("Unable to read path")?;
-		let metadata = EntryMetadata::from_file(file_metadata).context("Unable to create entry metadata")?;
-		entry.set_metadata(metadata);
+		let file_type = EntryFileType::from_file(file_metadata.file_type());
+		let entry = self
+			.read_path(path, Some(file_metadata), file_type)
+			.context("Unable to read path")?;
 		{
 			let mut inner = self.inner.lock();
 			inner.entries.insert(entry.clone());
@@ -166,7 +172,8 @@ impl ReadThread {
 			// TODO: On windows, we get the metadata with the directory for free,
 			//       so we should pass it along to `read_path` to set it on the
 			//       entry, avoiding a re-reading it later on.
-			if let Err(err) = self.read_path(entry_path) {
+			let file_type = EntryFileType::from_file(entry.file_type());
+			if let Err(err) = self.read_path(entry_path, None, file_type) {
 				tracing::warn!("Unable to read directory entry {entry_path:?}: {err:?}");
 			}
 		}
@@ -217,7 +224,14 @@ impl ReadThread {
 		match event.kind {
 			notify::EventKind::Create(_) =>
 				for path in event.event.paths {
-					if let Err(err) = self.read_path(&path) {
+					let res: Result<(), AppError> = try {
+						let metadata =
+							fs::metadata(&path).with_context(|| format!("Unable to get metadata of {path:?}"))?;
+						let file_type = EntryFileType::from_file(metadata.file_type());
+						self.read_path(&path, Some(&metadata), file_type)?;
+					};
+
+					if let Err(err) = res {
 						tracing::warn!("Unable to read path {path:?}: {err:?}");
 					}
 				},
@@ -253,9 +267,19 @@ impl ReadThread {
 	}
 
 	/// Reads a path
-	fn read_path(&self, path: &Path) -> Result<DirEntry, AppError> {
+	fn read_path(
+		&self,
+		path: &Path,
+		metadata: Option<&fs::Metadata>,
+		file_type: EntryFileType,
+	) -> Result<DirEntry, AppError> {
 		// Create the entry and insert it
-		let entry = DirEntry::new(EntrySource::Path(path.into()));
+		let entry = DirEntry::new(EntrySource::Path(path.into()), file_type);
+		if let Some(metadata) = metadata {
+			let metadata = EntryMetadata::from_file(metadata).context("Unable to create entry metadata")?;
+			entry.set_metadata(metadata);
+		}
+
 		self.inner.lock().insert(&entry)?;
 
 		Ok(entry)

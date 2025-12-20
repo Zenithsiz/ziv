@@ -38,7 +38,8 @@ use {
 
 #[derive(Debug)]
 struct Inner {
-	source: Mutex<EntrySource>,
+	source:    Mutex<EntrySource>,
+	file_type: EntryFileType,
 
 	metadata:  Loadable<EntryMetadata>,
 	data:      Loadable<EntryData>,
@@ -50,11 +51,17 @@ pub struct DirEntry(Arc<Inner>);
 
 impl DirEntry {
 	/// Creates a new directory entry
-	pub(super) fn new(source: EntrySource) -> Self {
+	pub(super) fn new(source: EntrySource, file_type: EntryFileType) -> Self {
+		let data = match file_type.is_dir() {
+			true => Loadable::loaded(EntryData::Other),
+			false => Loadable::new(),
+		};
+
 		Self(Arc::new(Inner {
-			source:    Mutex::new(source),
-			metadata:  Loadable::new(),
-			data:      Loadable::new(),
+			source: Mutex::new(source),
+			file_type,
+			metadata: Loadable::new(),
+			data,
 			thumbnail: Loadable::new(),
 		}))
 	}
@@ -83,6 +90,14 @@ impl DirEntry {
 			EntrySource::Path(path) => path.file_name().context("Missing file name").map(PathBuf::from),
 			EntrySource::Zip(zip) => Ok(zip.file_name().to_owned()),
 		}
+	}
+}
+
+/// File type
+impl DirEntry {
+	/// Returns this entry's file type
+	pub fn file_type(&self) -> EntryFileType {
+		self.0.file_type
 	}
 }
 
@@ -204,10 +219,38 @@ impl DirEntry {
 impl DirEntry {
 	/// Compares two directory entries according to a sort order.
 	///
+	/// # Equality
 	/// If the two are equal according to the sort order, they will
 	/// next be sorted by source.
+	///
+	/// # Directories
+	/// Directories will always be sorted *before* any other entries
 	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Result<Ordering, AppError> {
-		let cmp = match order.kind {
+		let cmp = self.cmp_with_inner(other, order.kind)?;
+		let cmp = match cmp {
+			Ordering::Equal => self.source().cmp(&other.source()),
+			_ => cmp,
+		};
+
+		let order = match order.reverse {
+			true => cmp.reverse(),
+			false => cmp,
+		};
+
+		Ok(order)
+	}
+
+	/// Helper for [`Self::cmp_with`] that does not check for item equality
+	/// nor for reverse orders
+	fn cmp_with_inner(&self, other: &Self, order_kind: SortOrderKind) -> Result<Ordering, AppError> {
+		// Sort directories before files
+		match (self.file_type(), other.file_type()) {
+			(EntryFileType::Directory, EntryFileType::File) => return Ok(Ordering::Less),
+			(EntryFileType::File, EntryFileType::Directory) => return Ok(Ordering::Greater),
+			_ => (),
+		}
+
+		let cmp = match order_kind {
 			SortOrderKind::FileName => {
 				let lhs = self.file_name().context("Unable to get file name")?;
 				let rhs = other.file_name().context("Unable to get file name")?;
@@ -237,7 +280,7 @@ impl DirEntry {
 					let resolution = match data {
 						EntryData::Image(image) => image.resolution_if_loaded()?.context("Missing resolution")?,
 						EntryData::Video(video) => video.resolution_if_loaded()?.context("Missing resolution")?,
-						// TODO: Is a resolution of 0 fine for this?
+						// TODO: Is a resolution of 0 fine for these?
 						EntryData::Other => EntryResolution { width: 0, height: 0 },
 					};
 
@@ -253,17 +296,7 @@ impl DirEntry {
 			},
 		};
 
-		let cmp = match cmp {
-			Ordering::Equal => self.source().cmp(&other.source()),
-			_ => cmp,
-		};
-
-		let order = match order.reverse {
-			true => cmp.reverse(),
-			false => cmp,
-		};
-
-		Ok(order)
+		Ok(cmp)
 	}
 
 	/// Returns if this entry is loaded for `order`
@@ -343,6 +376,29 @@ pub enum EntryData {
 	Other,
 }
 
+/// Entry file type
+#[derive(Clone, Copy, Debug)]
+pub enum EntryFileType {
+	File,
+	Symlink,
+	Directory,
+}
+impl EntryFileType {
+	/// Creates a file type from a filesystem file type
+	pub fn from_file(file_type: fs::FileType) -> Self {
+		match file_type {
+			_ if file_type.is_dir() => Self::Directory,
+			_ if file_type.is_symlink() => Self::Symlink,
+			_ => Self::File,
+		}
+	}
+
+	/// Returns if this file type is a directory
+	pub const fn is_dir(self) -> bool {
+		matches!(self, Self::Directory)
+	}
+}
+
 fn load_metadata(source: &EntrySource) -> Result<EntryMetadata, AppError> {
 	match source {
 		EntrySource::Path(path) => {
@@ -364,6 +420,11 @@ pub struct EntryResolution {
 fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	let source = entry.source();
 	let file_name = entry.file_name().context("Entry had no file name")?;
+
+	// If it's a directory it's non-media
+	if entry.file_type().is_dir() {
+		return Ok(EntryData::Other);
+	}
 
 	// Test against common zip archives
 	const COMMON_ZIP_FORMATS: &[&str] = &["zip", "cbz"];
@@ -397,6 +458,8 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	}
 
 	// If it's a directory it's non-media
+	// Note: This check involves touching the filesystem, so we only
+	//       do it after checking everything we can without IO
 	let is_dir = match &source {
 		EntrySource::Path(path) => fs::metadata(path).context("Unable to get file metadata")?.is_dir(),
 		EntrySource::Zip(zip) => zip.is_dir().context("Unable to check if zip entry was a directory")?,
