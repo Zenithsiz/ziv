@@ -272,7 +272,6 @@ impl DirEntry {
 			SortOrderKind::FileName => true,
 			SortOrderKind::ModificationDate | SortOrderKind::Size => self.0.metadata.is_loaded(),
 			SortOrderKind::Resolution(_) => {
-				// TODO: Is it fine to
 				let Some(data) = self.0.data.try_get()? else {
 					return Ok(false);
 				};
@@ -400,7 +399,6 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	// If it's a directory it's non-media
 	let is_dir = match &source {
 		EntrySource::Path(path) => fs::metadata(path).context("Unable to get file metadata")?.is_dir(),
-		// TODO: Check for directories inside of zip files
 		EntrySource::Zip(zip) => zip.is_dir().context("Unable to check if zip entry was a directory")?,
 	};
 	if is_dir {

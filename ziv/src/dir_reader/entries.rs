@@ -8,8 +8,6 @@ use {
 	std::borrow::Borrow,
 };
 
-// TODO: We need to be able to store duplicates here
-
 /// Entry using file name
 #[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
 #[repr(transparent)]
