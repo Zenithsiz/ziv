@@ -13,3 +13,5 @@
 - Getting an error from an entry should somehow automatically remove it from the list
 
 - Create some wrapper to generate the 4 `<field>_blocking`, `<field>_load`, `<field>_if_loaded` and `<field>_is_loaded` automatically.
+
+- Add support for plugins (using wasm?)
