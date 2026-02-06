@@ -17,7 +17,6 @@
 	macro_derive,
 	yield_expr,
 	gen_blocks,
-	array_windows,
 	thread_sleep_until,
 	try_trait_v2,
 	try_trait_v2_residual,

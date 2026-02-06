@@ -242,9 +242,8 @@ impl ReadThread {
 					self.inner.lock().rename(&from_path, to_path);
 				}
 
-				if let Some(remaining) = paths.into_remainder() &&
-					!remaining.is_empty()
-				{
+				let remaining = paths.into_remainder();
+				if !remaining.is_empty() {
 					tracing::warn!(
 						"Ignoring remaining paths in rename event: {:?}",
 						remaining.collect::<Vec<_>>()

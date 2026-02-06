@@ -68,10 +68,9 @@ impl<T, E> Loadable<T, E> {
 		T: Clone,
 		E: Clone,
 	{
-		// TODO: Use pattern matching once polonius comes around
 		let mut inner = self.inner.lock();
-		if inner.value.is_some() {
-			return inner.value.as_ref().expect("Just checked").clone().map(Some);
+		if let Some(value) = &inner.value {
+			return value.clone().map(Some);
 		}
 
 		let res = match &mut inner.task_rx {
@@ -98,10 +97,9 @@ impl<T, E> Loadable<T, E> {
 		E: Clone,
 		F: FnOnce() -> Result<T, E>,
 	{
-		// TODO: Use pattern matching once polonius comes around
 		let mut inner = self.inner.lock();
-		if inner.value.is_some() {
-			return inner.value.as_mut().expect("Just checked").clone();
+		if let Some(value) = &inner.value {
+			return value.clone();
 		}
 
 		let task_rx = inner.task_rx.take();
@@ -121,10 +119,9 @@ impl<T, E> Loadable<T, E> {
 		E: Send + Clone + 'static,
 		F: FnOnce() -> Result<T, E> + Send + 'static,
 	{
-		// TODO: Use pattern matching once polonius comes around
 		let mut inner = self.inner.lock();
-		if inner.value.is_some() {
-			return inner.value.as_mut().expect("Just checked").clone().map(Some);
+		if let Some(value) = &inner.value {
+			return value.clone().map(Some);
 		}
 
 		match &inner.task_rx {

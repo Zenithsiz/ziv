@@ -128,8 +128,8 @@ pub fn hot_reload<T: Serialize + DeserializeOwned>(path: impl AsRef<Path>, defau
 	let path = path.as_ref();
 	if fs::exists(path).is_ok_and(|exists| !exists) {
 		let res: Result<_, AppError> = try {
-			let contents = toml::to_string_pretty(&default)?;
-			fs::write(path, &contents)?;
+			let contents = toml::to_string_pretty(&default).context("Unable to serialize value")?;
+			fs::write(path, &contents).context("Unable to write file")?;
 		};
 
 		if let Err(err) = res {
