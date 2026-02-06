@@ -33,6 +33,7 @@ dir_entry_wrappers! {
 	Size,
 	ResolutionWidth,
 	ResolutionHeight,
+	Random,
 }
 
 macro dir_entry_wrappers {

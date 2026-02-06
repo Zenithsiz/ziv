@@ -63,6 +63,7 @@ impl Default for Shortcuts {
 						SortOrderKind::Size => egui::Key::F3,
 						SortOrderKind::ResolutionWidth => egui::Key::F4,
 						SortOrderKind::ResolutionHeight => egui::Key::F5,
+						SortOrderKind::Random => egui::Key::F6,
 					};
 
 					(kind, key.into())

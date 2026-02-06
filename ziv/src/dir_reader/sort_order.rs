@@ -15,4 +15,5 @@ pub enum SortOrderKind {
 	Size,
 	ResolutionWidth,
 	ResolutionHeight,
+	Random,
 }

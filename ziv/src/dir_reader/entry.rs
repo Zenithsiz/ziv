@@ -27,6 +27,7 @@ use {
 		fs,
 		io::{self, Read},
 		path::{Path, PathBuf},
+		random,
 		sync::Arc,
 		time::SystemTime,
 	},
@@ -41,6 +42,7 @@ struct Inner {
 	metadata:  Loadable<EntryMetadata>,
 	data:      Loadable<EntryData>,
 	thumbnail: Loadable<EntryThumbnail>,
+	random:    Mutex<Option<u64>>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +62,7 @@ impl DirEntry {
 			metadata: Loadable::new(),
 			data,
 			thumbnail: Loadable::new(),
+			random: Mutex::new(None),
 		}))
 	}
 }
@@ -292,6 +295,12 @@ impl DirEntry {
 					_ => unreachable!(),
 				}
 			},
+			SortOrderKind::Random => {
+				let lhs = self.0.random.lock().context("Missing random")?;
+				let rhs = other.0.random.lock().context("Missing random")?;
+
+				u64::cmp(&lhs, &rhs)
+			},
 		};
 
 		Ok(cmp)
@@ -313,6 +322,7 @@ impl DirEntry {
 					EntryData::Other => true,
 				}
 			},
+			SortOrderKind::Random => self.0.random.lock().is_some(),
 		};
 
 		Ok(is_loaded)
@@ -329,6 +339,7 @@ impl DirEntry {
 				EntryData::Video(video) => _ = video.resolution_blocking()?,
 				EntryData::Other => (),
 			},
+			SortOrderKind::Random => *self.0.random.lock() = Some(random::random(..)),
 		}
 
 		Ok(())

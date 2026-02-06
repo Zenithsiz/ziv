@@ -26,7 +26,8 @@
 	if_let_guard,
 	try_trait_v2_yeet,
 	vec_peek_mut,
-	macro_metavar_expr_concat
+	macro_metavar_expr_concat,
+	random
 )]
 
 // Modules
@@ -1569,6 +1570,7 @@ fn sort_order_name(sort_order: SortOrder) -> String {
 		SortOrderKind::Size => "Size",
 		SortOrderKind::ResolutionWidth => "Image width",
 		SortOrderKind::ResolutionHeight => "Image height",
+		SortOrderKind::Random => "Random",
 	};
 
 	match sort_order.reverse {
@@ -1701,6 +1703,7 @@ impl ShortcutKeyIdent {
 			SortOrderKind::Size => "size",
 			SortOrderKind::ResolutionWidth => "image width",
 			SortOrderKind::ResolutionHeight => "image height",
+			SortOrderKind::Random => "random",
 		}
 	}
 
