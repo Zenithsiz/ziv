@@ -20,6 +20,7 @@ ModificationDate = "F2"
 Size             = "F3"
 ResolutionWidth  = "F4"
 ResolutionHeight = "F5"
+Random           = "F6"
 
 [shortcuts.view_modes]
 FitWindow  = "Num1"
