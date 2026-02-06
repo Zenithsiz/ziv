@@ -347,7 +347,12 @@ impl DirEntry {
 				EntryData::Video(video) => _ = video.resolution_blocking()?,
 				EntryData::Other => (),
 			},
-			SortOrderKind::Random => *self.0.random.lock() = Some(random::random(..)),
+			SortOrderKind::Random => {
+				let mut random = self.0.random.lock();
+				if random.is_none() {
+					*random = Some(random::random(..));
+				}
+			},
 		}
 
 		Ok(())
