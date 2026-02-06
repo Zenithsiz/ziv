@@ -1212,23 +1212,7 @@ impl EguiApp {
 
 				ui.separator();
 
-				ui.menu_button("Sort order", |ui| {
-					let cur_sort_order = self.dir_reader.sort_order();
-					for sort_order_kind in SortOrderKind::variants() {
-						let sort_order = SortOrder {
-							reverse: match cur_sort_order.kind == sort_order_kind {
-								true => !cur_sort_order.reverse,
-								false => false,
-							},
-							kind:    sort_order_kind,
-						};
-						let name = self::sort_order_name(sort_order);
-
-						if ui.button(name).clicked() {
-							self.dir_reader.set_sort_order(sort_order);
-						}
-					}
-				});
+				self.draw_sort_order(ui);
 
 				ui.separator();
 
@@ -1275,6 +1259,26 @@ impl EguiApp {
 		}
 	}
 
+	fn draw_sort_order(&self, ui: &mut egui::Ui) {
+		ui.menu_button("Sort order", |ui| {
+			let cur_sort_order = self.dir_reader.sort_order();
+			for sort_order_kind in SortOrderKind::variants() {
+				let sort_order = SortOrder {
+					reverse: match cur_sort_order.kind == sort_order_kind {
+						true => !cur_sort_order.reverse,
+						false => false,
+					},
+					kind:    sort_order_kind,
+				};
+				let name = self::sort_order_name(sort_order);
+
+				if ui.button(name).clicked() {
+					self.dir_reader.set_sort_order(sort_order);
+				}
+			}
+		});
+	}
+
 	fn draw_display_list(&mut self, ctx: &egui::Context) {
 		let mut goto_entry = None;
 
@@ -1302,7 +1306,9 @@ impl EguiApp {
 					egui::Slider::new(&mut self.entries_per_row, 1..=10)
 						.text("Columns")
 						.clamping(egui::SliderClamping::Never)
-						.ui(ui)
+						.ui(ui);
+
+					self.draw_sort_order(ui);
 				});
 
 				if self.entries_per_row == 0 {
