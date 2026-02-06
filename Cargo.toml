@@ -9,7 +9,7 @@ description = "Zenithsiz's image viewer"
 edition     = "2024"
 license     = "MIT OR Apache-2.0"
 repository  = "https://github.com/zenithsiz/ziv"
-version     = "0.1.2"
+version     = "0.1.3"
 
 [workspace.dependencies]
 
