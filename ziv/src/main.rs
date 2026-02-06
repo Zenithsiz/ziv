@@ -1282,6 +1282,13 @@ impl EguiApp {
 	fn draw_display_list(&mut self, ctx: &egui::Context) {
 		let mut goto_entry = None;
 
+		let mut scroll_up = false;
+		let mut scroll_down = false;
+		ctx.input_mut(|input| {
+			scroll_up = input.consume_shortcut_key(self.shortcuts.pan_up);
+			scroll_down = input.consume_shortcut_key(self.shortcuts.pan_down);
+		});
+
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
@@ -1349,6 +1356,14 @@ impl EguiApp {
 			egui::ScrollArea::vertical()
 				.auto_shrink(false)
 				.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
+					// TODO: These amounts should be configurable
+					if scroll_up {
+						ui.scroll_with_delta(egui::vec2(0.0, 100.0));
+					}
+					if scroll_down {
+						ui.scroll_with_delta(egui::vec2(0.0, -100.0));
+					}
+
 					egui::Grid::new("display-list-entries")
 						.num_columns(self.entries_per_row)
 						.min_row_height(cell_size.y)
