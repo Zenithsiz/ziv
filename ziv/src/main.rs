@@ -1309,6 +1309,11 @@ impl EguiApp {
 						.ui(ui);
 
 					self.draw_sort_order(ui);
+
+					if self.dir_reader.sort_order().kind == SortOrderKind::Random && ui.button("Re-randomize").clicked()
+					{
+						self.dir_reader.randomize();
+					}
 				});
 
 				if self.entries_per_row == 0 {

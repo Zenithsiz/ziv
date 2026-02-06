@@ -215,6 +215,14 @@ impl DirEntry {
 	}
 }
 
+/// Random
+impl DirEntry {
+	/// Resets the random seed of this entry.
+	pub fn reset_random(&self) {
+		*self.0.random.lock() = None;
+	}
+}
+
 /// Misc.
 impl DirEntry {
 	/// Compares two directory entries according to a sort order.

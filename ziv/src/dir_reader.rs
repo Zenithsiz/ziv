@@ -58,7 +58,7 @@ pub struct DirReader {
 	_read_thread: thread::JoinHandle<()>,
 	_sort_thread: thread::JoinHandle<()>,
 
-	sort_thread_tx: mpsc::Sender<SortOrder>,
+	sort_thread_tx: mpsc::Sender<sort_thread::Event>,
 }
 
 impl DirReader {
@@ -124,7 +124,12 @@ impl DirReader {
 
 	/// Sets the sort order
 	pub fn set_sort_order(&self, sort_order: SortOrder) {
-		_ = self.sort_thread_tx.send(sort_order);
+		_ = self.sort_thread_tx.send(sort_thread::Event::Sort(sort_order));
+	}
+
+	/// Re-randomizers all entries
+	pub fn randomize(&self) {
+		_ = self.sort_thread_tx.send(sort_thread::Event::Randomize);
 	}
 
 	/// Returns a range of entries
