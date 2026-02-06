@@ -25,7 +25,8 @@
 	formatting_options,
 	if_let_guard,
 	try_trait_v2_yeet,
-	vec_peek_mut
+	vec_peek_mut,
+	macro_metavar_expr_concat
 )]
 
 // Modules
