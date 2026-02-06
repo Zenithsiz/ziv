@@ -1686,6 +1686,9 @@ impl ShortcutKeyIdent {
 					},
 			}
 		}
+
+		#[cfg(rust_analyzer)]
+		unreachable!();
 	}
 
 	const fn sort_name(kind: SortOrderKind) -> &'static str {

@@ -33,6 +33,9 @@ impl SortOrderKind {
 					},
 			}
 		}
+
+		#[cfg(rust_analyzer)]
+		unreachable!();
 	}
 }
 
