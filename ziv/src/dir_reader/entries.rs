@@ -8,68 +8,11 @@ use {
 	std::borrow::Borrow,
 };
 
-/// Entry using file name
-#[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
-#[repr(transparent)]
-struct DirEntryFileName(DirEntry);
-
-impl Ord for DirEntryFileName {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0
-			.cmp_with(&other.0, SortOrder {
-				reverse: false,
-				kind:    super::SortOrderKind::FileName,
-			})
-			.expect("Entry wasn't loaded")
-	}
-}
-
-/// Entry using modified date
-#[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
-#[repr(transparent)]
-struct DirEntryModifiedDate(DirEntry);
-
-impl Ord for DirEntryModifiedDate {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0
-			.cmp_with(&other.0, SortOrder {
-				reverse: false,
-				kind:    super::SortOrderKind::ModificationDate,
-			})
-			.expect("Entry wasn't loaded")
-	}
-}
-
-/// Entry using size
-#[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
-#[repr(transparent)]
-struct DirEntrySize(DirEntry);
-
-impl Ord for DirEntrySize {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0
-			.cmp_with(&other.0, SortOrder {
-				reverse: false,
-				kind:    super::SortOrderKind::Size,
-			})
-			.expect("Entry wasn't loaded")
-	}
-}
-
-/// Entry using resolution
-#[derive(self::DirEntryWrapper, ref_cast::RefCast, derive_more::From, Debug)]
-#[repr(transparent)]
-struct DirEntryResolution<const DIR: SortOrderResolutionDir>(DirEntry);
-
-impl<const DIR: SortOrderResolutionDir> Ord for DirEntryResolution<DIR> {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0
-			.cmp_with(&other.0, SortOrder {
-				reverse: false,
-				kind:    super::SortOrderKind::Resolution(DIR),
-			})
-			.expect("Entry wasn't loaded")
-	}
+dir_entry_wrappers! {
+	DirEntryFileName = super::SortOrderKind::FileName;
+	DirEntryModifiedDate = super::SortOrderKind::ModificationDate;
+	DirEntrySize = super::SortOrderKind::Size;
+	DirEntryResolution<const DIR: SortOrderResolutionDir> = super::SortOrderKind::Resolution(DIR);
 }
 
 #[derive(Debug)]
@@ -131,15 +74,15 @@ impl Entries {
 
 	pub fn first(&self) -> Option<&DirEntry> {
 		match_inner! { entries @ &self.inner => match self.reverse {
-			true => entries.last().map(|entry| &entry.0),
-			false => entries.first().map(|entry| &entry.0),
+			true => entries.last().map(AsRef::as_ref),
+			false => entries.first().map(AsRef::as_ref),
 		}}
 	}
 
 	pub fn last(&self) -> Option<&DirEntry> {
 		match_inner! { entries @ &self.inner => match self.reverse {
-			true => entries.first().map(|entry| &entry.0),
-			false => entries.last().map(|entry| &entry.0),
+			true => entries.first().map(AsRef::as_ref),
+			false => entries.last().map(AsRef::as_ref),
 		}}
 	}
 
@@ -159,7 +102,7 @@ impl Entries {
 			false => idx,
 		};
 
-		match_inner! { entries @ &self.inner => entries.get_index(idx).map(|entry| &entry.0) }
+		match_inner! { entries @ &self.inner => entries.get_index(idx).map(AsRef::as_ref) }
 	}
 
 	pub fn search(&self, entry: &DirEntry) -> usize {
@@ -234,7 +177,7 @@ impl<'a> Iterator for Range<'a> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		macro inner($iter:ident) {
-			self::iter_next($iter, self.reverse).map(|entry| &entry.0)
+			self::iter_next($iter, self.reverse).map(AsRef::as_ref)
 		}
 		match &mut self.iter {
 			RangeInner::FileName(iter) => inner!(iter),
@@ -249,7 +192,7 @@ impl<'a> Iterator for Range<'a> {
 impl DoubleEndedIterator for Range<'_> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		macro inner($iter:ident) {
-			self::iter_next_back($iter, self.reverse).map(|entry| &entry.0)
+			self::iter_next_back($iter, self.reverse).map(AsRef::as_ref)
 		}
 		match &mut self.iter {
 			RangeInner::FileName(iter) => inner!(iter),
@@ -281,7 +224,7 @@ impl<'a> Iterator for Iter<'a> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		macro inner($iter:ident) {
-			self::iter_next($iter, self.reverse).map(|entry| &entry.0)
+			self::iter_next($iter, self.reverse).map(AsRef::as_ref)
 		}
 		match &mut self.iter {
 			IterInner::FileName(iter) => inner!(iter),
@@ -296,7 +239,7 @@ impl<'a> Iterator for Iter<'a> {
 impl DoubleEndedIterator for Iter<'_> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		macro inner($iter:ident) {
-			self::iter_next_back($iter, self.reverse).map(|entry| &entry.0)
+			self::iter_next_back($iter, self.reverse).map(AsRef::as_ref)
 		}
 		match &mut self.iter {
 			IterInner::FileName(iter) => inner!(iter),
@@ -316,7 +259,7 @@ impl IntoIterator for Entries {
 	fn into_iter(self) -> Self::IntoIter {
 		// TODO: Not collect all entries before returning
 		let entries = match_inner! { entries @ self.inner => {
-			let iter = entries.into_iter().map(|entry| entry.0);
+			let iter = entries.into_iter().map(Into::into);
 			match self.reverse {
 				true => iter.rev().collect::<Vec<_>>(),
 				false => iter.collect(),
@@ -366,34 +309,52 @@ macro match_inner($name:ident $(: $T:ident)? @ $inner:expr => $res:expr) {{
 	}
 }}
 
-macro DirEntryWrapper {
-	derive() (
-		$(#[$meta:meta])*
-		struct $Name:ident
-		$(<
-
-			$( const $GenericConst:ident: $GenericTy:ty )*
-		>)?
-		(DirEntry);
+macro dir_entry_wrappers {
+	(
+		$(
+			$Name:ident
+			$(<
+				$( const $GenericConst:ident: $GenericTy:ty )*
+			>)?
+			= $sort_order_kind:expr
+			;
+		)*
 	) => {
-		impl $(< $( const $GenericConst: $GenericTy )* >)? Borrow<DirEntry> for $Name $(< $( $GenericConst )* >)? {
-			fn borrow(&self) -> &DirEntry {
-				&self.0
-			}
-		}
+		$(
+			#[derive(ref_cast::RefCast, derive_more::From, derive_more::Into, derive_more::AsRef, Debug)]
+			#[repr(transparent)]
+			struct $Name $(< $( const $GenericConst: $GenericTy )* >)? (DirEntry);
 
-		impl $(< $( const $GenericConst: $GenericTy )* >)? PartialEq for $Name $(< $( $GenericConst )* >)? {
-			fn eq(&self, other: &Self) -> bool {
-				self.cmp(other).is_eq()
+			impl $(< $( const $GenericConst: $GenericTy )* >)? Borrow<DirEntry> for $Name $(< $( $GenericConst )* >)? {
+				fn borrow(&self) -> &DirEntry {
+					&self.0
+				}
 			}
-		}
 
-		impl $(< $( const $GenericConst: $GenericTy )* >)? Eq for $Name $(< $( $GenericConst )* >)? {}
-
-		impl $(< $( const $GenericConst: $GenericTy )* >)? PartialOrd for $Name $(< $( $GenericConst )* >)? {
-			fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-				Some(self.cmp(other))
+			impl $(< $( const $GenericConst: $GenericTy )* >)? PartialEq for $Name $(< $( $GenericConst )* >)? {
+				fn eq(&self, other: &Self) -> bool {
+					self.cmp(other).is_eq()
+				}
 			}
-		}
+
+			impl $(< $( const $GenericConst: $GenericTy )* >)? Eq for $Name $(< $( $GenericConst )* >)? {}
+
+			impl $(< $( const $GenericConst: $GenericTy )* >)? PartialOrd for $Name $(< $( $GenericConst )* >)? {
+				fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+					Some(self.cmp(other))
+				}
+			}
+
+			impl $(< $( const $GenericConst: $GenericTy )* >)? Ord for $Name $(< $( $GenericConst )* >)? {
+				fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+					self.0
+						.cmp_with(&other.0, SortOrder {
+							reverse: false,
+							kind:    $sort_order_kind,
+						})
+						.expect("Entry wasn't loaded")
+				}
+			}
+		)*
 	}
 }
