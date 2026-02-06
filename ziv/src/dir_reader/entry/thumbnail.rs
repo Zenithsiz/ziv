@@ -45,6 +45,9 @@ impl EntryThumbnail {
 		let thumbnail_path = thumbnails_dir.join(thumbnail_file_name);
 
 		let (thumbnail, thumbnail_source) = match image::open(&thumbnail_path) {
+			// TODO: If the file is newer than our thumbnail, we should invalidate it.
+			//       Unfortunately, we can't check this without loading it somehow, so
+			//       the user might only see new thumbnails when loading the image.
 			Ok(image) => (image, EntrySource::Path(thumbnail_path.into())),
 			Err(_) => {
 				let (thumbnail, thumbnail_source) = match data {
