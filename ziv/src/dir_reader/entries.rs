@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{DirEntry, SortOrder, SortOrderKind, sort_order::SortOrderResolutionDir},
+	super::{DirEntry, SortOrder, SortOrderKind},
 	core::ops::{Bound, IntoBounds},
 	ref_cast::RefCast,
 	std::borrow::Borrow,
@@ -12,7 +12,8 @@ dir_entry_wrappers! {
 	DirEntryFileName = super::SortOrderKind::FileName;
 	DirEntryModifiedDate = super::SortOrderKind::ModificationDate;
 	DirEntrySize = super::SortOrderKind::Size;
-	DirEntryResolution<const DIR: SortOrderResolutionDir> = super::SortOrderKind::Resolution(DIR);
+	DirEntryResolutionWidth = super::SortOrderKind::ResolutionWidth;
+	DirEntryResolutionHeight = super::SortOrderKind::ResolutionHeight;
 }
 
 #[derive(Debug)]
@@ -20,8 +21,8 @@ enum Inner {
 	FileName(indexset::BTreeSet<DirEntryFileName>),
 	ModificationDate(indexset::BTreeSet<DirEntryModifiedDate>),
 	Size(indexset::BTreeSet<DirEntrySize>),
-	ResolutionWidth(indexset::BTreeSet<DirEntryResolution<{ SortOrderResolutionDir::Width }>>),
-	ResolutionHeight(indexset::BTreeSet<DirEntryResolution<{ SortOrderResolutionDir::Height }>>),
+	ResolutionWidth(indexset::BTreeSet<DirEntryResolutionWidth>),
+	ResolutionHeight(indexset::BTreeSet<DirEntryResolutionHeight>),
 }
 
 /// Entries
@@ -37,10 +38,8 @@ impl Entries {
 			SortOrderKind::FileName => Inner::FileName(indexset::BTreeSet::new()),
 			SortOrderKind::ModificationDate => Inner::ModificationDate(indexset::BTreeSet::new()),
 			SortOrderKind::Size => Inner::Size(indexset::BTreeSet::new()),
-			SortOrderKind::Resolution(SortOrderResolutionDir::Width) =>
-				Inner::ResolutionWidth(indexset::BTreeSet::new()),
-			SortOrderKind::Resolution(SortOrderResolutionDir::Height) =>
-				Inner::ResolutionHeight(indexset::BTreeSet::new()),
+			SortOrderKind::ResolutionWidth => Inner::ResolutionWidth(indexset::BTreeSet::new()),
+			SortOrderKind::ResolutionHeight => Inner::ResolutionHeight(indexset::BTreeSet::new()),
 		};
 
 		Self {
@@ -54,8 +53,8 @@ impl Entries {
 			Inner::FileName(_) => SortOrderKind::FileName,
 			Inner::ModificationDate(_) => SortOrderKind::ModificationDate,
 			Inner::Size(_) => SortOrderKind::Size,
-			Inner::ResolutionWidth(_) => SortOrderKind::Resolution(SortOrderResolutionDir::Width),
-			Inner::ResolutionHeight(_) => SortOrderKind::Resolution(SortOrderResolutionDir::Height),
+			Inner::ResolutionWidth(_) => SortOrderKind::ResolutionWidth,
+			Inner::ResolutionHeight(_) => SortOrderKind::ResolutionHeight,
 		};
 
 		SortOrder {
@@ -162,8 +161,8 @@ enum RangeInner<'a> {
 	FileName(#[debug(ignore)] indexset::Range<'a, DirEntryFileName>),
 	ModificationDate(#[debug(ignore)] indexset::Range<'a, DirEntryModifiedDate>),
 	Size(#[debug(ignore)] indexset::Range<'a, DirEntrySize>),
-	ResolutionWidth(#[debug(ignore)] indexset::Range<'a, DirEntryResolution<{ SortOrderResolutionDir::Width }>>),
-	ResolutionHeight(#[debug(ignore)] indexset::Range<'a, DirEntryResolution<{ SortOrderResolutionDir::Height }>>),
+	ResolutionWidth(#[debug(ignore)] indexset::Range<'a, DirEntryResolutionWidth>),
+	ResolutionHeight(#[debug(ignore)] indexset::Range<'a, DirEntryResolutionHeight>),
 }
 
 #[derive(Debug)]
@@ -209,8 +208,8 @@ enum IterInner<'a> {
 	FileName(#[debug(ignore)] indexset::Iter<'a, DirEntryFileName>),
 	ModificationDate(#[debug(ignore)] indexset::Iter<'a, DirEntryModifiedDate>),
 	Size(#[debug(ignore)] indexset::Iter<'a, DirEntrySize>),
-	ResolutionWidth(#[debug(ignore)] indexset::Iter<'a, DirEntryResolution<{ SortOrderResolutionDir::Width }>>),
-	ResolutionHeight(#[debug(ignore)] indexset::Iter<'a, DirEntryResolution<{ SortOrderResolutionDir::Height }>>),
+	ResolutionWidth(#[debug(ignore)] indexset::Iter<'a, DirEntryResolutionWidth>),
+	ResolutionHeight(#[debug(ignore)] indexset::Iter<'a, DirEntryResolutionHeight>),
 }
 
 #[derive(Debug)]
@@ -299,11 +298,11 @@ macro match_inner($name:ident $(: $T:ident)? @ $inner:expr => $res:expr) {{
 			$res
 		},
 		Inner::ResolutionWidth($name) => {
-			$( type $T = DirEntryResolution<{ SortOrderResolutionDir::Width }>; )?
+			$( type $T = DirEntryResolutionWidth; )?
 			$res
 		},
 		Inner::ResolutionHeight($name) => {
-			$( type $T = DirEntryResolution<{ SortOrderResolutionDir::Height }>; )?
+			$( type $T = DirEntryResolutionHeight; )?
 			$res
 		},
 	}
@@ -313,9 +312,6 @@ macro dir_entry_wrappers {
 	(
 		$(
 			$Name:ident
-			$(<
-				$( const $GenericConst:ident: $GenericTy:ty )*
-			>)?
 			= $sort_order_kind:expr
 			;
 		)*
@@ -323,29 +319,29 @@ macro dir_entry_wrappers {
 		$(
 			#[derive(ref_cast::RefCast, derive_more::From, derive_more::Into, derive_more::AsRef, Debug)]
 			#[repr(transparent)]
-			struct $Name $(< $( const $GenericConst: $GenericTy )* >)? (DirEntry);
+			struct $Name (DirEntry);
 
-			impl $(< $( const $GenericConst: $GenericTy )* >)? Borrow<DirEntry> for $Name $(< $( $GenericConst )* >)? {
+			impl Borrow<DirEntry> for $Name {
 				fn borrow(&self) -> &DirEntry {
 					&self.0
 				}
 			}
 
-			impl $(< $( const $GenericConst: $GenericTy )* >)? PartialEq for $Name $(< $( $GenericConst )* >)? {
+			impl PartialEq for $Name {
 				fn eq(&self, other: &Self) -> bool {
 					self.cmp(other).is_eq()
 				}
 			}
 
-			impl $(< $( const $GenericConst: $GenericTy )* >)? Eq for $Name $(< $( $GenericConst )* >)? {}
+			impl Eq for $Name {}
 
-			impl $(< $( const $GenericConst: $GenericTy )* >)? PartialOrd for $Name $(< $( $GenericConst )* >)? {
+			impl PartialOrd for $Name {
 				fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
 					Some(self.cmp(other))
 				}
 			}
 
-			impl $(< $( const $GenericConst: $GenericTy )* >)? Ord for $Name $(< $( $GenericConst )* >)? {
+			impl Ord for $Name {
 				fn cmp(&self, other: &Self) -> std::cmp::Ordering {
 					self.0
 						.cmp_with(&other.0, SortOrder {

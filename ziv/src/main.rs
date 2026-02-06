@@ -25,8 +25,7 @@
 	formatting_options,
 	if_let_guard,
 	try_trait_v2_yeet,
-	vec_peek_mut,
-	adt_const_params
+	vec_peek_mut
 )]
 
 // Modules
@@ -49,7 +48,6 @@ use {
 			SortOrder,
 			SortOrderKind,
 			entry::{EntryData, EntrySource, EntryThumbnail, image::EntryImageTexture, video::PlayingStatus},
-			sort_order::SortOrderResolutionDir,
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -1262,7 +1260,7 @@ impl EguiApp {
 	fn draw_sort_order(&self, ui: &mut egui::Ui) {
 		ui.menu_button("Sort order", |ui| {
 			let cur_sort_order = self.dir_reader.sort_order();
-			for sort_order_kind in SortOrderKind::variants() {
+			for &sort_order_kind in SortOrderKind::VARIANTS {
 				let sort_order = SortOrder {
 					reverse: match cur_sort_order.kind == sort_order_kind {
 						true => !cur_sort_order.reverse,
@@ -1568,10 +1566,8 @@ fn sort_order_name(sort_order: SortOrder) -> String {
 		SortOrderKind::FileName => "File name",
 		SortOrderKind::ModificationDate => "Modified date",
 		SortOrderKind::Size => "Size",
-		SortOrderKind::Resolution(dir) => match dir {
-			SortOrderResolutionDir::Width => "Image width",
-			SortOrderResolutionDir::Height => "Image height",
-		},
+		SortOrderKind::ResolutionWidth => "Image width",
+		SortOrderKind::ResolutionHeight => "Image height",
 	};
 
 	match sort_order.reverse {
@@ -1683,7 +1679,7 @@ impl ShortcutKeyIdent {
 				ShortcutKeyIdentInner::Quit => yield Self::Quit,
 				ShortcutKeyIdentInner::ToggleDisplayMode => yield Self::ToggleDisplayMode,
 				ShortcutKeyIdentInner::Sort =>
-					for kind in SortOrderKind::variants() {
+					for &kind in SortOrderKind::VARIANTS {
 						yield Self::Sort(kind);
 					},
 				ShortcutKeyIdentInner::ViewModes =>
@@ -1702,10 +1698,8 @@ impl ShortcutKeyIdent {
 			SortOrderKind::FileName => "file name",
 			SortOrderKind::ModificationDate => "modification date",
 			SortOrderKind::Size => "size",
-			SortOrderKind::Resolution(dir) => match dir {
-				SortOrderResolutionDir::Width => "image width",
-				SortOrderResolutionDir::Height => "image height",
-			},
+			SortOrderKind::ResolutionWidth => "image width",
+			SortOrderKind::ResolutionHeight => "image height",
 		}
 	}
 

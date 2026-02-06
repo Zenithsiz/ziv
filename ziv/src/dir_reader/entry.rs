@@ -17,10 +17,7 @@ pub use self::{
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::{
-		dir_reader::sort_order::SortOrderResolutionDir,
-		util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
-	},
+	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash},
@@ -274,7 +271,7 @@ impl DirEntry {
 
 				u64::cmp(&lhs, &rhs)
 			},
-			SortOrderKind::Resolution(dir) => {
+			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => {
 				fn resolution(entry: &DirEntry) -> Result<EntryResolution, AppError> {
 					let data = entry.data_if_loaded()?.context("Missing data")?;
 					let resolution = match data {
@@ -289,9 +286,10 @@ impl DirEntry {
 
 				let lhs = resolution(self)?;
 				let rhs = resolution(other)?;
-				match dir {
-					SortOrderResolutionDir::Width => usize::cmp(&lhs.width, &rhs.width),
-					SortOrderResolutionDir::Height => usize::cmp(&lhs.height, &rhs.height),
+				match order_kind {
+					SortOrderKind::ResolutionWidth => usize::cmp(&lhs.width, &rhs.width),
+					SortOrderKind::ResolutionHeight => usize::cmp(&lhs.height, &rhs.height),
+					_ => unreachable!(),
 				}
 			},
 		};
@@ -304,7 +302,7 @@ impl DirEntry {
 		let is_loaded = match order.kind {
 			SortOrderKind::FileName => true,
 			SortOrderKind::ModificationDate | SortOrderKind::Size => self.0.metadata.is_loaded(),
-			SortOrderKind::Resolution(_) => {
+			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => {
 				let Some(data) = self.0.data.try_get()? else {
 					return Ok(false);
 				};
@@ -326,7 +324,7 @@ impl DirEntry {
 			SortOrderKind::FileName => _ = self.file_name().context("Unable to load file name")?,
 			SortOrderKind::ModificationDate => _ = self.modified_date_blocking()?,
 			SortOrderKind::Size => _ = self.size_blocking()?,
-			SortOrderKind::Resolution(_) => match self.data_blocking()? {
+			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => match self.data_blocking()? {
 				EntryData::Image(image) => _ = image.resolution_blocking()?,
 				EntryData::Video(video) => _ = video.resolution_blocking()?,
 				EntryData::Other => (),
