@@ -319,3 +319,16 @@ pub impl egui::Context {
 		self.load_texture(name, image, options)
 	}
 }
+
+#[doc(hidden)]
+pub struct Defer<F: FnOnce()>(pub Option<F>);
+
+impl<F: FnOnce()> Drop for Defer<F> {
+	fn drop(&mut self) {
+		self.0.take().expect("Should exist")();
+	}
+}
+
+pub macro defer($e:expr) {
+	let _defer = Defer(Some(|| $e));
+}

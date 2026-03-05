@@ -17,7 +17,7 @@ pub use self::{
 // Imports
 use {
 	super::{SortOrder, SortOrderKind},
-	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
+	crate::util::{AppError, Loadable, PriorityThreadPool, defer, priority_thread_pool::Priority},
 	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash},
@@ -208,6 +208,8 @@ impl DirEntry {
 	) -> Result<Option<EntryThumbnail>, AppError> {
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
+			defer! { egui_ctx.request_repaint() }
+
 			let source = this.source();
 			let data = this.data_blocking().context("Unable to load data")?;
 			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data).context("Unable to create thumbnail")
