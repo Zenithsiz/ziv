@@ -1427,7 +1427,7 @@ impl EguiApp {
 				let row = idx / self.entries_per_row;
 				let column = idx % self.entries_per_row;
 				// TODO: Why do we need a further offset of 3.0 here?
-				let offset = (row_size + egui::vec2(0.0, 3.0)) * egui::vec2(column as f32, row as f32);
+				let offset = egui::vec2(0.0, row_size.y + 3.0) * egui::vec2(column as f32, row as f32);
 				scroll_area = scroll_area.scroll_offset(offset);
 			}
 
