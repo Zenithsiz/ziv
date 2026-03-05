@@ -5660,7 +5660,7 @@ dependencies = [
 
 [[package]]
 name = "ziv"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "app-error",
  "bitflags 2.10.0",
