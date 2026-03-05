@@ -243,6 +243,12 @@ impl EguiApp {
 				let entry = entry.context("Unable to read directory entry")?;
 				Ok(entry.path())
 			})
+			.sorted_by(|lhs, rhs| {
+				let lhs = lhs.as_deref().ok();
+				let rhs = rhs.as_deref().ok();
+
+				lhs.cmp(&rhs)
+			})
 			.collect::<Result<_, AppError>>()
 			.context("Unable to collect all scripts in directory")?;
 
