@@ -11,6 +11,10 @@ pub struct Config {
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub thumbnails_cache: Option<PathBuf>,
 
+	/// Scripts directory
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub scripts_dir: Option<PathBuf>,
+
 	/// Preload previous/next
 	pub preload: [usize; 2],
 
@@ -42,6 +46,7 @@ impl Default for Config {
 	fn default() -> Self {
 		Self {
 			thumbnails_cache: None,
+			scripts_dir:      None,
 			preload:          [1, 1],
 			shortcuts:        Shortcuts::default(),
 			controls:         Controls {

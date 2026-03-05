@@ -21,6 +21,9 @@ pub struct Dirs {
 	// TODO: Use the xdg spec thumbnail directory instead of our own?
 	thumbnails: OnceLock<Arc<Path>>,
 
+	/// Scripts directory
+	scripts: OnceLock<Arc<Path>>,
+
 	/// Config file
 	config: OnceLock<Arc<Path>>,
 }
@@ -33,6 +36,7 @@ impl Dirs {
 		Ok(Self {
 			inner,
 			thumbnails: OnceLock::new(),
+			scripts: OnceLock::new(),
 			config: OnceLock::new(),
 		})
 	}
@@ -42,6 +46,15 @@ impl Dirs {
 		self.thumbnails.get_or_init(|| {
 			let path = self.inner.cache_dir().join("thumbnails");
 			tracing::info!("Thumbnails directory: {path:?}");
+			path.into()
+		})
+	}
+
+	/// Returns the scripts directory
+	pub fn scripts(&self) -> &Arc<Path> {
+		self.scripts.get_or_init(|| {
+			let path = self.inner.config_dir().join("scripts");
+			tracing::info!("Scripts directory: {path:?}");
 			path.into()
 		})
 	}

@@ -72,7 +72,7 @@ use {
 		fmt::Write,
 		fs,
 		path::{Path, PathBuf},
-		process::ExitCode,
+		process::{self, ExitCode},
 		sync::{Arc, mpsc},
 		vec,
 	},
@@ -190,6 +190,9 @@ struct EguiApp {
 	shortcuts:                Shortcuts,
 	entries_per_row:          usize,
 	thumbnails_dir:           Option<Arc<Path>>,
+	scripts_dir:              Option<Arc<Path>>,
+	scripts:                  Arc<[PathBuf]>,
+	running_scripts:          Vec<process::Child>,
 	controls:                 Controls,
 	vertical_pan_smooth:      f32,
 	settings_is_open:         bool,
@@ -226,10 +229,21 @@ impl EguiApp {
 			ctx:      cc.egui_ctx.clone(),
 		});
 
-		// Create the thumbnail path
+		// Create some directories
 		let thumbnails_dir = config.thumbnails_cache.map(Arc::from);
 		fs::create_dir_all(thumbnails_dir.as_ref().unwrap_or_else(|| dirs.thumbnails()))
 			.context("Unable to create thumbnails directory")?;
+		let scripts_dir = config.scripts_dir.map(Arc::from);
+		fs::create_dir_all(scripts_dir.as_ref().unwrap_or_else(|| dirs.scripts()))
+			.context("Unable to create scripts directory")?;
+		let scripts = fs::read_dir(scripts_dir.as_ref().unwrap_or_else(|| dirs.scripts()))
+			.context("Unable to read scripts directory")?
+			.map(|entry| {
+				let entry = entry.context("Unable to read directory entry")?;
+				Ok(entry.path())
+			})
+			.collect::<Result<_, AppError>>()
+			.context("Unable to collect all scripts in directory")?;
 
 		Ok(Self {
 			config_path,
@@ -247,6 +261,9 @@ impl EguiApp {
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
 			thumbnails_dir,
+			scripts_dir,
+			scripts,
+			running_scripts: vec![],
 			shortcuts: config.shortcuts,
 			controls: Controls {
 				zoom_sensitivity:         config.controls.zoom_sensitivity,
@@ -276,6 +293,7 @@ impl EguiApp {
 	fn save_config(&self) -> Result<(), AppError> {
 		let config = Config {
 			thumbnails_cache: self.thumbnails_dir.as_deref().map(PathBuf::from),
+			scripts_dir:      self.scripts_dir.as_deref().map(PathBuf::from),
 			preload:          [self.preload_prev, self.preload_next],
 			shortcuts:        self.shortcuts.clone(),
 			controls:         config::Controls {
@@ -321,6 +339,24 @@ impl EguiApp {
 		f: impl FnOnce(&mut Self, &DirEntry) -> Result<T, AppError>,
 	) -> Option<T> {
 		self.try_with_entry(entry, |this, entry| f(this, entry).map(Some))
+	}
+
+	/// Runs a script
+	fn run_script(&mut self, script: &Path, cur_entry: &CurEntry) -> Result<(), AppError> {
+		let entry_source = cur_entry.source();
+		let entry_path = match &entry_source {
+			EntrySource::Path(path) => path,
+			EntrySource::Zip(path) => path.archive_path(),
+		};
+
+		// TODO: Pass a json argument with details?
+		let script = process::Command::new(script)
+			.arg(entry_path)
+			.spawn()
+			.context("Unable to spawn script")?;
+
+		self.running_scripts.push(script);
+		Ok(())
 	}
 
 	fn reset_on_change_entry(&mut self, prev_entry: &CurEntry, new_entry: &CurEntry) {
@@ -1211,6 +1247,8 @@ impl EguiApp {
 				if ui.button("Settings").clicked() {
 					self.settings_is_open = true;
 				}
+
+				self.draw_scripts(ui, &cur_entry);
 			});
 
 			draw_output
@@ -1266,6 +1304,28 @@ impl EguiApp {
 
 				if ui.button(name).clicked() {
 					self.dir_reader.set_sort_order(sort_order);
+				}
+			}
+		});
+	}
+
+	fn draw_scripts(&mut self, ui: &mut egui::Ui, cur_entry: &CurEntry) {
+		ui.menu_button("Scripts", |ui| {
+			if self.scripts.is_empty() {
+				ui.small("Any scripts in the script directory will show up here");
+			}
+
+			let scripts = Arc::clone(&self.scripts);
+			for script in &*scripts {
+				let Some(name) = script.file_name() else {
+					tracing::warn!("Script had no file name: {script:?}");
+					continue;
+				};
+
+				if ui.button(name.to_string_lossy()).clicked() &&
+					let Err(err) = self.run_script(script, cur_entry)
+				{
+					tracing::warn!("Unable to run script {script:?}: {err:?}");
 				}
 			}
 		});
