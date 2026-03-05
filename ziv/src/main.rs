@@ -179,7 +179,7 @@ struct Controls {
 #[derive(Debug)]
 struct EguiApp {
 	config_path:              PathBuf,
-	_dirs:                    Arc<Dirs>,
+	dirs:                     Arc<Dirs>,
 	thread_pool:              PriorityThreadPool,
 	dir_reader:               DirReader,
 	next_frame_idx:           usize,
@@ -189,7 +189,7 @@ struct EguiApp {
 	display_mode:             DisplayMode,
 	shortcuts:                Shortcuts,
 	entries_per_row:          usize,
-	thumbnails_dir:           ThumbnailsDir,
+	thumbnails_dir:           Option<Arc<Path>>,
 	controls:                 Controls,
 	vertical_pan_smooth:      f32,
 	settings_is_open:         bool,
@@ -226,24 +226,14 @@ impl EguiApp {
 			ctx:      cc.egui_ctx.clone(),
 		});
 
-		// Create and canonicalize the thumbnail path
-		let thumbnails_dir = match config.thumbnails_cache {
-			Some(dir) => ThumbnailsDir::Specified(Arc::from(dir)),
-			None => ThumbnailsDir::Auto(Arc::clone(dirs.thumbnails())),
-		};
-		fs::create_dir_all(thumbnails_dir.path()).context("Unable to create thumbnails directory")?;
-		let path = thumbnails_dir
-			.path()
-			.canonicalize()
-			.context("Unable to canonicalize thumbnails directory")?;
-		let thumbnails_dir = match thumbnails_dir {
-			ThumbnailsDir::Auto(_) => ThumbnailsDir::Auto(Arc::from(path)),
-			ThumbnailsDir::Specified(_) => ThumbnailsDir::Specified(Arc::from(path)),
-		};
+		// Create the thumbnail path
+		let thumbnails_dir = config.thumbnails_cache.map(Arc::from);
+		fs::create_dir_all(thumbnails_dir.as_ref().unwrap_or_else(|| dirs.thumbnails()))
+			.context("Unable to create thumbnails directory")?;
 
 		Ok(Self {
 			config_path,
-			_dirs: dirs,
+			dirs,
 			thread_pool,
 			dir_reader,
 			next_frame_idx: 0,
@@ -277,13 +267,15 @@ impl EguiApp {
 		})
 	}
 
+	/// Gets the thumbnail directory
+	fn thumbnails_dir(&self) -> &Arc<Path> {
+		self.thumbnails_dir.as_ref().unwrap_or_else(|| self.dirs.thumbnails())
+	}
+
 	/// Saves the configuration
 	fn save_config(&self) -> Result<(), AppError> {
 		let config = Config {
-			thumbnails_cache: match &self.thumbnails_dir {
-				ThumbnailsDir::Auto(_path) => None,
-				ThumbnailsDir::Specified(path) => Some(path.to_path_buf()),
-			},
+			thumbnails_cache: self.thumbnails_dir.as_deref().map(PathBuf::from),
 			preload:          [self.preload_prev, self.preload_next],
 			shortcuts:        self.shortcuts.clone(),
 			controls:         config::Controls {
@@ -1400,7 +1392,7 @@ impl EguiApp {
 												let Some(thumbnail) = entry.thumbnail(
 													&this.thread_pool,
 													ui.ctx(),
-													this.thumbnails_dir.path(),
+													this.thumbnails_dir(),
 												)?
 												else {
 													return Ok(None);
@@ -1751,20 +1743,6 @@ impl ShortcutKeyIdent {
 			Self::ToggleDisplayMode => &mut shortcuts.toggle_display_mode,
 			Self::Sort(kind) => shortcuts.sort.entry(kind).or_insert(ShortcutKey::UNBOUND),
 			Self::ViewModes(view_mode) => shortcuts.view_modes.entry(view_mode).or_insert(ShortcutKey::UNBOUND),
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-enum ThumbnailsDir {
-	Auto(Arc<Path>),
-	Specified(Arc<Path>),
-}
-
-impl ThumbnailsDir {
-	const fn path(&self) -> &Arc<Path> {
-		match self {
-			Self::Auto(path) | Self::Specified(path) => path,
 		}
 	}
 }
