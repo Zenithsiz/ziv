@@ -177,6 +177,7 @@ struct Controls {
 // TODO: This is a big mess, we need to organize it better
 //       and rename things to not be as confusing.
 #[derive(Debug)]
+#[expect(clippy::struct_excessive_bools, reason = "TODO")]
 struct EguiApp {
 	config_path:              PathBuf,
 	dirs:                     Arc<Dirs>,
@@ -190,6 +191,7 @@ struct EguiApp {
 	display_mode_switched:    bool,
 	shortcuts:                Shortcuts,
 	entries_per_row:          usize,
+	entries_per_row_changed:  bool,
 	thumbnails_dir:           Option<Arc<Path>>,
 	scripts_dir:              Option<Arc<Path>>,
 	scripts:                  Arc<[PathBuf]>,
@@ -287,6 +289,7 @@ impl EguiApp {
 			settings_waiting_for_key: None,
 			prev_valid_entry: None,
 			entries_per_row: 4,
+			entries_per_row_changed: false,
 			new_entry_rx,
 			loading_entries: vec![],
 		})
@@ -1370,10 +1373,11 @@ impl EguiApp {
 				self.draw_info_window(ctx, None);
 
 				ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-					egui::Slider::new(&mut self.entries_per_row, 1..=10)
+					let response = egui::Slider::new(&mut self.entries_per_row, 1..=10)
 						.text("Columns")
 						.clamping(egui::SliderClamping::Never)
 						.ui(ui);
+					self.entries_per_row_changed = response.changed();
 
 					self.draw_sort_order(ui);
 
@@ -1415,7 +1419,8 @@ impl EguiApp {
 
 			let mut scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
 
-			if self.display_mode_switched &&
+			let should_update_scroll = self.display_mode_switched || self.entries_per_row_changed;
+			if should_update_scroll &&
 				let Some(cur_entry) = self.dir_reader.cur_entry() &&
 				let Some(idx) = cur_entry.idx
 			{
