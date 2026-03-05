@@ -187,6 +187,7 @@ struct EguiApp {
 	resized_image:            bool,
 	view_mode:                ViewMode,
 	display_mode:             DisplayMode,
+	display_mode_switched:    bool,
 	shortcuts:                Shortcuts,
 	entries_per_row:          usize,
 	thumbnails_dir:           Option<Arc<Path>>,
@@ -258,6 +259,7 @@ impl EguiApp {
 			resized_image: false,
 			view_mode: ViewMode::FitWindow,
 			display_mode: DisplayMode::Image,
+			display_mode_switched: false,
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
 			thumbnails_dir,
@@ -1405,127 +1407,134 @@ impl EguiApp {
 				return;
 			}
 
-			egui::ScrollArea::vertical()
-				.auto_shrink(false)
-				.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
-					// TODO: These amounts should be configurable
-					if scroll_up {
-						ui.scroll_with_delta(egui::vec2(0.0, 100.0));
-					}
-					if scroll_down {
-						ui.scroll_with_delta(egui::vec2(0.0, -100.0));
-					}
+			let mut scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
 
-					egui::Grid::new("display-list-entries")
-						.num_columns(self.entries_per_row)
-						.min_row_height(cell_size.y)
-						.min_col_width(cell_size.x)
-						.max_col_width(cell_size.x)
-						.start_row(rows.start)
-						.spacing([0.0, 0.0])
-						.show(ui, |ui| {
-							for row in rows {
-								let idxs =
-									(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
-								let Some(entries) = self.dir_reader.entry_range(idxs) else {
-									continue;
+			if self.display_mode_switched &&
+				let Some(cur_entry) = self.dir_reader.cur_entry() &&
+				let Some(idx) = cur_entry.idx
+			{
+				let row = idx / self.entries_per_row;
+				let column = idx % self.entries_per_row;
+				// TODO: Why do we need a further offset of 3.0 here?
+				let offset = (row_size + egui::vec2(0.0, 3.0)) * egui::vec2(column as f32, row as f32);
+				scroll_area = scroll_area.scroll_offset(offset);
+			}
+
+			scroll_area.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
+				// TODO: These amounts should be configurable
+				if scroll_up {
+					ui.scroll_with_delta(egui::vec2(0.0, 100.0));
+				}
+				if scroll_down {
+					ui.scroll_with_delta(egui::vec2(0.0, -100.0));
+				}
+
+				egui::Grid::new("display-list-entries")
+					.num_columns(self.entries_per_row)
+					.min_row_height(cell_size.y)
+					.min_col_width(cell_size.x)
+					.max_col_width(cell_size.x)
+					.start_row(rows.start)
+					.spacing([0.0, 0.0])
+					.show(ui, |ui| {
+						for row in rows {
+							let idxs =
+								(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
+							let Some(entries) = self.dir_reader.entry_range(idxs) else {
+								continue;
+							};
+
+							for entry in entries {
+								let hovered_id = egui::Id::new(("display-list-hover", &entry));
+
+								let hovered = ui.data(|data| data.get_temp(hovered_id)).unwrap_or(false);
+								let stroke_color = match hovered {
+									true => egui::Color32::from_rgba_premultiplied(0xd0, 0xd0, 0xd0, 0xff),
+									false => egui::Color32::TRANSPARENT,
 								};
+								let cell_frame =
+									cell_frame.stroke(egui::Stroke::new(cell_frame.stroke.width, stroke_color));
 
-								for entry in entries {
-									let hovered_id = egui::Id::new(("display-list-hover", &entry));
-
-									let hovered = ui.data(|data| data.get_temp(hovered_id)).unwrap_or(false);
-									let stroke_color = match hovered {
-										true => egui::Color32::from_rgba_premultiplied(0xd0, 0xd0, 0xd0, 0xff),
-										false => egui::Color32::TRANSPARENT,
-									};
-									let cell_frame =
-										cell_frame.stroke(egui::Stroke::new(cell_frame.stroke.width, stroke_color));
-
-									let frame_res = cell_frame.show(ui, |ui| {
-										ui.vertical(|ui| {
-											enum Thumbnail {
-												Image(EntryImageTexture),
-												NonMedia,
-											}
-											let thumbnail = self.try_with_entry(&entry, |this, entry| try {
-												let Some(thumbnail) = entry.thumbnail(
-													&this.thread_pool,
-													ui.ctx(),
-													this.thumbnails_dir(),
-												)?
-												else {
-													return Ok(None);
-												};
-
-												match thumbnail {
-													EntryThumbnail::Image(image) =>
-														image.texture()?.map(Thumbnail::Image),
-													EntryThumbnail::NonMedia => Some(Thumbnail::NonMedia),
-												}
-											});
+								let frame_res = cell_frame.show(ui, |ui| {
+									ui.vertical(|ui| {
+										enum Thumbnail {
+											Image(EntryImageTexture),
+											NonMedia,
+										}
+										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
+											let Some(thumbnail) =
+												entry.thumbnail(&this.thread_pool, ui.ctx(), this.thumbnails_dir())?
+											else {
+												return Ok(None);
+											};
 
 											match thumbnail {
-												// TODO: Not have to manually paint the texture?
-												Some(Thumbnail::Image(texture)) => {
-													let texture_size = texture.size_vec2();
-
-													let image_as = image_size.y / image_size.x;
-													let texture_as = texture_size.y / texture_size.x;
-
-													let width_ratio = image_size.x / texture_size.x;
-													let height_ratio = image_size.y / texture_size.y;
-
-													let x_ratio = height_ratio / width_ratio;
-													let y_ratio = width_ratio / height_ratio;
-
-													let aspect_ratio = match image_as > texture_as {
-														true => egui::vec2(1.0, y_ratio),
-														false => egui::vec2(x_ratio, 1.0),
-													};
-
-													let uv_rect =
-														egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE);
-
-													let ui_center_pos = ui.next_widget_position() + image_size / 2.0;
-													let ui_size = image_size * aspect_ratio;
-
-													let ui_rect = egui::Rect::from_center_size(ui_center_pos, ui_size);
-
-													texture.paint_at(ui, uv_rect, ui_rect);
-												},
-												Some(Thumbnail::NonMedia) => self.remove_entry(&entry),
-												None => (),
-											}
-
-											let response = ui.allocate_response(image_size, egui::Sense::click());
-											if response.double_clicked() {
-												goto_entry = Some(entry.clone());
-											}
-
-											if let Ok(file_name) = entry.file_name() {
-												ui.centered_and_justified(|ui| {
-													let response = egui::Label::new(file_name.display().to_string())
-														.wrap_mode(egui::TextWrapMode::Truncate)
-														.ui(ui);
-
-													// TODO: Should a double click on the text actually enter the image?
-													//       Maybe the user just wants to select it all.
-													if response.double_clicked() {
-														goto_entry = Some(entry.clone());
-													}
-												});
+												EntryThumbnail::Image(image) => image.texture()?.map(Thumbnail::Image),
+												EntryThumbnail::NonMedia => Some(Thumbnail::NonMedia),
 											}
 										});
+
+										match thumbnail {
+											// TODO: Not have to manually paint the texture?
+											Some(Thumbnail::Image(texture)) => {
+												let texture_size = texture.size_vec2();
+
+												let image_as = image_size.y / image_size.x;
+												let texture_as = texture_size.y / texture_size.x;
+
+												let width_ratio = image_size.x / texture_size.x;
+												let height_ratio = image_size.y / texture_size.y;
+
+												let x_ratio = height_ratio / width_ratio;
+												let y_ratio = width_ratio / height_ratio;
+
+												let aspect_ratio = match image_as > texture_as {
+													true => egui::vec2(1.0, y_ratio),
+													false => egui::vec2(x_ratio, 1.0),
+												};
+
+												let uv_rect =
+													egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ONE);
+
+												let ui_center_pos = ui.next_widget_position() + image_size / 2.0;
+												let ui_size = image_size * aspect_ratio;
+
+												let ui_rect = egui::Rect::from_center_size(ui_center_pos, ui_size);
+
+												texture.paint_at(ui, uv_rect, ui_rect);
+											},
+											Some(Thumbnail::NonMedia) => self.remove_entry(&entry),
+											None => (),
+										}
+
+										let response = ui.allocate_response(image_size, egui::Sense::click());
+										if response.double_clicked() {
+											goto_entry = Some(entry.clone());
+										}
+
+										if let Ok(file_name) = entry.file_name() {
+											ui.centered_and_justified(|ui| {
+												let response = egui::Label::new(file_name.display().to_string())
+													.wrap_mode(egui::TextWrapMode::Truncate)
+													.ui(ui);
+
+												// TODO: Should a double click on the text actually enter the image?
+												//       Maybe the user just wants to select it all.
+												if response.double_clicked() {
+													goto_entry = Some(entry.clone());
+												}
+											});
+										}
 									});
+								});
 
-									ui.data_mut(|data| data.insert_temp(hovered_id, frame_res.response.hovered()));
-								}
-
-								ui.end_row();
+								ui.data_mut(|data| data.insert_temp(hovered_id, frame_res.response.hovered()));
 							}
-						});
-				});
+
+							ui.end_row();
+						}
+					});
+			});
 		});
 
 		if let Some(entry) = goto_entry {
@@ -1628,8 +1637,10 @@ impl eframe::App for EguiApp {
 			ctx.send_viewport_cmd(egui::ViewportCommand::Close);
 		}
 
+		self.display_mode_switched = false;
 		if toggle_display_mode {
 			self.display_mode = self.display_mode.toggle();
+			self.display_mode_switched = true;
 		}
 	}
 }
