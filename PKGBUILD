@@ -1,6 +1,6 @@
 # Maintainer: Filipe Rodrigues <filipejacintorodrigues1@gmail.com>
 pkgname=ziv
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc="Zenithsiz's image viewer"
 arch=('x86_64')
@@ -9,7 +9,7 @@ license=('MIT' 'APACHE-2')
 depends=('gcc-libs')
 makedepends=('cargo-nightly')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/zenithsiz/$pkgname/archive/$pkgver.tar.gz")
-sha512sums=('55e643d6f93ab56317b4699953bf8e69f210467cc71b5c47029dcbcffc375222ccca1eea8ea77e5447ec9e6798d983eb8c8b978070da7256851ff0204824300c')
+sha512sums=('e1fdc008f6f4e4044d219ad75069f7f33ecb032f6fe8596e2501ce29524ea991b1c24c557f72becbf71113481e3acf99682f364e9d53c6cec109472abf283685')
 # Note: Required due to a linking error with `zstd`.
 options=(!lto)
 
