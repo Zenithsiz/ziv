@@ -203,6 +203,9 @@ struct EguiApp {
 	settings_waiting_for_key: Option<ShortcutKeyIdent>,
 	prev_valid_entry:         Option<DirEntry>,
 
+	cur_frame_size:  Option<egui::Vec2>,
+	last_frame_size: Option<egui::Vec2>,
+
 	preload_prev: usize,
 	preload_next: usize,
 
@@ -288,6 +291,8 @@ impl EguiApp {
 			settings_tab: SettingsTab::General,
 			settings_waiting_for_key: None,
 			prev_valid_entry: None,
+			cur_frame_size: None,
+			last_frame_size: None,
 			entries_per_row: 4,
 			entries_per_row_changed: false,
 			new_entry_rx,
@@ -1419,7 +1424,9 @@ impl EguiApp {
 
 			let mut scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
 
-			let should_update_scroll = self.display_mode_switched || self.entries_per_row_changed;
+			let should_update_scroll = self.display_mode_switched ||
+				self.entries_per_row_changed ||
+				self.cur_frame_size != self.last_frame_size;
 			if should_update_scroll &&
 				let Some(cur_entry) = self.dir_reader.cur_entry() &&
 				let Some(idx) = cur_entry.idx
@@ -1622,6 +1629,8 @@ impl eframe::App for EguiApp {
 			}
 		});
 
+		self.cur_frame_size = Some(ctx.content_rect().size());
+
 		match self.display_mode {
 			DisplayMode::Image => self.draw_display_image(ctx),
 			DisplayMode::List => self.draw_display_list(ctx),
@@ -1653,6 +1662,8 @@ impl eframe::App for EguiApp {
 			self.display_mode = self.display_mode.toggle();
 			self.display_mode_switched = true;
 		}
+
+		self.last_frame_size = self.cur_frame_size;
 	}
 }
 
