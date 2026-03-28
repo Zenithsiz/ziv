@@ -53,7 +53,7 @@ use {
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
-		util::{AppError, PriorityThreadPool, RectUtils},
+		util::{AppError, EguiTextureHandle, PriorityThreadPool, RectUtils},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -176,7 +176,7 @@ struct Controls {
 
 // TODO: This is a big mess, we need to organize it better
 //       and rename things to not be as confusing.
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 #[expect(clippy::struct_excessive_bools, reason = "TODO")]
 struct EguiApp {
 	config_path:              PathBuf,
@@ -216,6 +216,10 @@ struct EguiApp {
 
 	new_entry_rx:    mpsc::Receiver<DirEntry>,
 	loading_entries: Vec<DirEntry>,
+
+	texture_options:  egui::TextureOptions,
+	#[debug(ignore)]
+	empty_image_data: egui::ImageData,
 }
 
 impl EguiApp {
@@ -297,6 +301,8 @@ impl EguiApp {
 			entries_per_row_changed: false,
 			new_entry_rx,
 			loading_entries: vec![],
+			texture_options: egui::TextureOptions::LINEAR,
+			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
 		})
 	}
 
@@ -442,6 +448,28 @@ impl EguiApp {
 
 				Ok(())
 			});
+		}
+	}
+
+	// TODO: Ideally this would be done during drawing, since the options are specified
+	//       as part of the pass, not as part of the image, but `egui` doesn't expose that,
+	//       so we need to fake a write to the image to change it.
+	fn update_texture_options_handle(&self, handle: &EguiTextureHandle) {
+		let mut handle = handle.clone();
+		handle.set_partial([0, 0], self.empty_image_data.clone(), self.texture_options);
+	}
+
+	fn update_texture_options(&self, texture: &EntryImageTexture) {
+		match *texture {
+			EntryImageTexture::Simple(ref handle) => self.update_texture_options_handle(handle),
+			EntryImageTexture::Tiled {
+				tiles_width: _,
+				tiles_height: _,
+				ref tiles,
+			} =>
+				for tile in &**tiles {
+					self.update_texture_options_handle(tile);
+				},
 		}
 	}
 
@@ -677,6 +705,7 @@ impl EguiApp {
 		window_response: &egui::Response,
 		vertical_pan: f32,
 		controls: &Controls,
+		texture_options: &mut egui::TextureOptions,
 	) -> egui::Response {
 		let window_size = ui.available_size().round_ui();
 		let window_as = window_size.y / window_size.x;
@@ -780,6 +809,11 @@ impl EguiApp {
 		let image_response = ui.allocate_rect(ui_rect, egui::Sense::all());
 		draw_image(ui, ui_rect, uv_rect);
 
+		let uv_size = uv_rect.size() * image_size / ui_rect.size();
+		*texture_options = match uv_size.x >= 0.1 || uv_size.y >= 0.1 {
+			true => egui::TextureOptions::LINEAR,
+			false => egui::TextureOptions::NEAREST,
+		};
 
 		if window_response.hovered() || image_response.hovered() {
 			// When dragging or scrolling, handle panning
@@ -1056,6 +1090,7 @@ impl EguiApp {
 					egui::Image::new(&handle).uv(uv_rect).paint_at(ui, ui_rect);
 				};
 
+				let prev_texture_options = self.texture_options;
 				output.image_response = Some(Self::draw_image(
 					ui,
 					draw_image,
@@ -1065,8 +1100,13 @@ impl EguiApp {
 					input.window_response,
 					vertical_pan,
 					&self.controls,
+					&mut self.texture_options,
 				));
 				self.draw_video_controls(ui, input, &video);
+
+				if prev_texture_options != self.texture_options {
+					self.update_texture_options(&EntryImageTexture::Simple(handle));
+				}
 			},
 
 			EntryData::Image(image) => {
@@ -1095,6 +1135,7 @@ impl EguiApp {
 					self.resized_image = true;
 				}
 
+				let prev_texture_options = self.texture_options;
 				output.image_response = Some(Self::draw_image(
 					ui,
 					draw_image,
@@ -1104,7 +1145,12 @@ impl EguiApp {
 					input.window_response,
 					vertical_pan,
 					&self.controls,
+					&mut self.texture_options,
 				));
+
+				if prev_texture_options != self.texture_options {
+					self.update_texture_options(&texture);
+				}
 			},
 
 			EntryData::Other => self.remove_entry(input.entry),
