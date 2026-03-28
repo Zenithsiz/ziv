@@ -35,7 +35,7 @@ md5                   = { workspace = true }
 natord                = { workspace = true }
 notify                = { workspace = true }
 notify-debouncer-full = { workspace = true }
-oneshot               = { workspace = true }
+oneshot               = { features = ["std"], workspace = true }
 opener                = { features = ["reveal"], workspace = true }
 parking_lot           = { workspace = true }
 ref-cast              = { workspace = true }
@@ -46,7 +46,7 @@ toml                  = { workspace = true }
 tracing               = { workspace = true }
 url                   = { workspace = true }
 walkdir               = { workspace = true }
-zip                   = { workspace = true }
+zip                   = { features = ["time"], workspace = true }
 zutil-cloned          = { workspace = true }
 zutil-logger          = { workspace = true }
 

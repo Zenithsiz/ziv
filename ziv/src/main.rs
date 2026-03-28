@@ -492,7 +492,7 @@ impl EguiApp {
 	}
 
 	/// Draws the info window
-	fn draw_info_window(&mut self, ctx: &egui::Context, cur_entry: Option<&CurEntry>) {
+	fn draw_info_window(&mut self, ui: &egui::Ui, cur_entry: Option<&CurEntry>) {
 		egui::Window::new("info-window")
 			.title_bar(false)
 			.resizable(false)
@@ -504,7 +504,7 @@ impl EguiApp {
 				..egui::Frame::NONE
 			})
 			.anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
-			.show(ctx, |ui| {
+			.show(ui, |ui| {
 				ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
 
 				let mut info = String::new();
@@ -530,7 +530,7 @@ impl EguiApp {
 	}
 
 	/// Draws the config window, if open
-	fn draw_config_window(&mut self, ctx: &egui::Context) {
+	fn draw_config_window(&mut self, ui: &egui::Ui) {
 		if !self.settings_is_open {
 			return;
 		}
@@ -542,16 +542,16 @@ impl EguiApp {
 		// TODO: Switch to a deferred viewport?
 		let id = egui::ViewportId::from_hash_of("config-window");
 		let builder = egui::ViewportBuilder::default().with_title("Settings");
-		let output = ctx.show_viewport_immediate(id, builder, |ctx, _| {
+		let output = ui.show_viewport_immediate(id, builder, |ui, _| {
 			let mut output = Output { should_close: false };
 
-			ctx.input(|input| {
+			ui.input(|input| {
 				if input.viewport().close_requested() {
 					output.should_close = true;
 				}
 			});
 
-			egui::CentralPanel::default().show(ctx, |ui| {
+			egui::CentralPanel::default().show_inside(ui, |ui| {
 				ui.horizontal(|ui| {
 					for &tab in SettingsTab::VARIANTS {
 						ui.selectable_value(&mut self.settings_tab, tab, tab.to_string());
@@ -592,7 +592,7 @@ impl EguiApp {
 					},
 					SettingsTab::Shortcuts => {
 						if let Some(shortcut_ident) = self.settings_waiting_for_key {
-							ctx.input(|input| {
+							ui.input(|input| {
 								for event in &input.events {
 									let &egui::Event::Key { key, modifiers, .. } = event else {
 										continue;
@@ -624,7 +624,7 @@ impl EguiApp {
 											name += " (⎇ Alt)";
 										}
 										if shortcut_key.modifiers.ctrl ||
-											(!ctx.os().is_mac() && shortcut_key.modifiers.command)
+											(!ui.os().is_mac() && shortcut_key.modifiers.command)
 										{
 											name += " (⎈ Ctrl)";
 										}
@@ -632,7 +632,7 @@ impl EguiApp {
 											name += " (⇧ Shift)";
 										}
 										if shortcut_key.modifiers.mac_cmd ||
-											(ctx.os().is_mac() && shortcut_key.modifiers.command)
+											(ui.os().is_mac() && shortcut_key.modifiers.command)
 										{
 											name += " (⌘ Cmd)";
 										}
@@ -873,7 +873,7 @@ impl EguiApp {
 		let height_animation_id = egui::Id::new("video-controls-animation");
 		let height_animation_time = 0.15;
 		let height_animation_active = is_hovering_window && !is_pointer_stopped;
-		let height_animation_scale = ui.ctx().animate_bool_with_time_and_easing(
+		let height_animation_scale = ui.animate_bool_with_time_and_easing(
 			height_animation_id,
 			height_animation_active,
 			height_animation_time,
@@ -1017,13 +1017,13 @@ impl EguiApp {
 			.expect("Entry should be valid");
 
 		for entry in [preload_before, preload_after].into_iter().flatten() {
-			self.preload_entry(ui.ctx(), &entry);
+			self.preload_entry(ui, &entry);
 		}
 
 		match data {
 			EntryData::Video(video) => {
 				if !video.started() {
-					video.start(ui.ctx().clone());
+					video.start(ui.clone());
 				}
 
 				let Some(handle) = video.handle() else {
@@ -1071,7 +1071,7 @@ impl EguiApp {
 
 			EntryData::Image(image) => {
 				let Some(texture) = self.try_with_entry(input.entry, |this, _| {
-					image.load(&this.thread_pool, ui.ctx())?;
+					image.load(&this.thread_pool, ui)?;
 					image.texture()
 				}) else {
 					ui.centered_and_justified(|ui| {
@@ -1113,14 +1113,14 @@ impl EguiApp {
 		output
 	}
 
-	fn draw_display_image(&mut self, ctx: &egui::Context) {
+	fn draw_display_image(&mut self, ui: &mut egui::Ui) {
 		let mut fullscreen = false;
 		let mut move_prev = false;
 		let mut move_next = false;
 		let mut move_first = false;
 		let mut move_last = false;
 		let mut toggle_pause = false;
-		ctx.input_mut(|input| {
+		ui.input_mut(|input| {
 			fullscreen = input.pointer.button_double_clicked(egui::PointerButton::Primary);
 
 			move_prev = input.consume_shortcut_key(self.shortcuts.prev);
@@ -1190,13 +1190,13 @@ impl EguiApp {
 
 		let cur_entry = cur_entry;
 
-		self.draw_info_window(ctx, Some(&cur_entry));
+		self.draw_info_window(ui, Some(&cur_entry));
 
 		let panel_frame = egui::Frame {
 			fill: egui::Color32::BLACK,
 			..egui::Frame::NONE
 		};
-		let panel_output = egui::CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
+		let panel_output = egui::CentralPanel::default().frame(panel_frame).show_inside(ui, |ui| {
 			let window_response = ui.interact(
 				egui::Rect::from_min_size(egui::Pos2::ZERO, ui.available_size()),
 				egui::Id::new("whole-screen"),
@@ -1237,7 +1237,7 @@ impl EguiApp {
 				if let EntrySource::Path(cur_entry_path) = cur_entry.source() {
 					if ui.button("Copy path").clicked() {
 						// TODO: Not copy a lossy string?
-						ctx.send_cmd(egui::OutputCommand::CopyText(
+						ui.send_cmd(egui::OutputCommand::CopyText(
 							cur_entry_path.to_string_lossy().into_owned(),
 						));
 					}
@@ -1245,7 +1245,7 @@ impl EguiApp {
 
 				if ui.button("Copy file name").clicked() {
 					// TODO: Not copy a lossy string?
-					ctx.send_cmd(egui::OutputCommand::CopyText(
+					ui.send_cmd(egui::OutputCommand::CopyText(
 						cur_entry
 							.file_name()
 							.expect("Entry had no file name")
@@ -1285,23 +1285,23 @@ impl EguiApp {
 		//       we'd always move ourselves to the user's left/top-most monitor, which isn't
 		//       correct.
 		if let Some(image_size) = draw_output.resize_size &&
-			let Some(monitor_size) = ctx.input(|input| input.viewport().monitor_size)
+			let Some(monitor_size) = ui.input(|input| input.viewport().monitor_size)
 		{
 			let scale = f32::min(monitor_size.x / image_size.x, monitor_size.y / image_size.y).min(1.0);
 			let size = (image_size * scale).round_ui();
 
 			tracing::info!("Resizing to {}x{}", size.x, size.y);
-			ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+			ui.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
 		}
 
 		// TODO: Don't change the title each frame?
-		ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title(&cur_entry)));
+		ui.send_viewport_cmd(egui::ViewportCommand::Title(self.title(&cur_entry)));
 
 		// TODO: Don't duplicate this by returning the fact that we want to fullscreen instead
 		// TODO: Also allow double-clicking an empty part in the display list to fullscreen
-		let is_fullscreen = ctx.input(|input| input.viewport().fullscreen).unwrap_or(false);
+		let is_fullscreen = ui.input(|input| input.viewport().fullscreen).unwrap_or(false);
 		if fullscreen {
-			ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+			ui.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
 		}
 	}
 
@@ -1347,12 +1347,12 @@ impl EguiApp {
 		});
 	}
 
-	fn draw_display_list(&mut self, ctx: &egui::Context) {
+	fn draw_display_list(&mut self, ui: &mut egui::Ui) {
 		let mut goto_entry = None;
 
 		let mut scroll_up = false;
 		let mut scroll_down = false;
-		ctx.input_mut(|input| {
+		ui.input_mut(|input| {
 			scroll_up = input.consume_shortcut_key(self.shortcuts.pan_up);
 			scroll_down = input.consume_shortcut_key(self.shortcuts.pan_down);
 		});
@@ -1371,11 +1371,11 @@ impl EguiApp {
 			fill: egui::Color32::BLACK,
 			..egui::Frame::NONE
 		};
-		egui::TopBottomPanel::top("display-list-controls")
+		egui::Panel::top("display-list-controls")
 			.show_separator_line(false)
 			.frame(bg_frame)
-			.show(ctx, |ui| {
-				self.draw_info_window(ctx, None);
+			.show_inside(ui, |ui| {
+				self.draw_info_window(ui, None);
 
 				ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
 					let response = egui::Slider::new(&mut self.entries_per_row, 1..=10)
@@ -1397,7 +1397,7 @@ impl EguiApp {
 				}
 			});
 
-		egui::CentralPanel::default().frame(bg_frame).show(ctx, |ui| {
+		egui::CentralPanel::default().frame(bg_frame).show_inside(ui, |ui| {
 			let total_entries = self.dir_reader.len();
 			let entry_rows = total_entries.div_ceil(self.entries_per_row);
 
@@ -1481,7 +1481,7 @@ impl EguiApp {
 										}
 										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
 											let Some(thumbnail) =
-												entry.thumbnail(&this.thread_pool, ui.ctx(), this.thumbnails_dir())?
+												entry.thumbnail(&this.thread_pool, ui, this.thumbnails_dir())?
 											else {
 												return Ok(None);
 											};
@@ -1563,7 +1563,7 @@ impl EguiApp {
 }
 
 impl eframe::App for EguiApp {
-	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+	fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
 		// Receive and try to load any new entries
 		// TODO: This should be configurable because it can do IO
 		// Note: To be more efficient, we use `swap_remove` when removing entries
@@ -1607,7 +1607,7 @@ impl eframe::App for EguiApp {
 		let mut quit = false;
 		let mut toggle_display_mode = false;
 		let mut set_sort_order = None;
-		ctx.input_mut(|input| {
+		ui.input_mut(|input| {
 			fullscreen = input.consume_shortcut_key(self.shortcuts.fullscreen);
 
 			exit_fullscreen_or_quit = input.consume_shortcut_key(self.shortcuts.exit_fullscreen_or_quit);
@@ -1629,32 +1629,32 @@ impl eframe::App for EguiApp {
 			}
 		});
 
-		self.cur_frame_size = Some(ctx.content_rect().size());
+		self.cur_frame_size = Some(ui.content_rect().size());
 
 		match self.display_mode {
-			DisplayMode::Image => self.draw_display_image(ctx),
-			DisplayMode::List => self.draw_display_list(ctx),
+			DisplayMode::Image => self.draw_display_image(ui),
+			DisplayMode::List => self.draw_display_list(ui),
 		}
-		self.draw_config_window(ctx);
+		self.draw_config_window(ui);
 
 		if let Some(sort_order) = set_sort_order {
 			self.dir_reader.set_sort_order(sort_order);
 		}
 
-		let is_fullscreen = ctx.input(|input| input.viewport().fullscreen).unwrap_or(false);
+		let is_fullscreen = ui.input(|input| input.viewport().fullscreen).unwrap_or(false);
 		if fullscreen {
-			ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+			ui.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
 		}
 
 		if exit_fullscreen_or_quit {
 			match is_fullscreen {
-				true => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false)),
-				false => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+				true => ui.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false)),
+				false => ui.send_viewport_cmd(egui::ViewportCommand::Close),
 			}
 		}
 
 		if quit {
-			ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+			ui.send_viewport_cmd(egui::ViewportCommand::Close);
 		}
 
 		self.display_mode_switched = false;

@@ -95,12 +95,17 @@ impl ReadThread {
 					Some(secs_from_epoch) => SystemTime::UNIX_EPOCH + Duration::from_secs(secs_from_epoch.into()),
 					// TODO: Should this be fallible?
 					None => {
+						// Note: The zip datetime doesn't contain any time zone information, so we
+						//       simply assume UTC and convert that to the current system time.
+						// TODO: Should we instead assume the local timezone?
 						let time = file.last_modified().context("File had no modified time")?;
-						let time = time::OffsetDateTime::try_from(time).context("File had an invalid modified time")?;
+						let time_from_epoch = time::PrimitiveDateTime::try_from(time)
+							.context("File had an invalid modified time")?
+							.assume_utc()
+							.unix_timestamp();
 
-						let unix_epoch = time::OffsetDateTime::UNIX_EPOCH;
-						let time_from_epoch_abs = (time - unix_epoch).unsigned_abs();
-						match time > unix_epoch {
+						let time_from_epoch_abs = Duration::from_secs(time_from_epoch.unsigned_abs());
+						match time_from_epoch > 0 {
 							true => SystemTime::UNIX_EPOCH + time_from_epoch_abs,
 							false => SystemTime::UNIX_EPOCH - time_from_epoch_abs,
 						}
