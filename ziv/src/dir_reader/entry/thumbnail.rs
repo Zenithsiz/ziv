@@ -147,72 +147,77 @@ pub fn video_thumbnail(path: &Path) -> Result<DynamicImage, AppError> {
 	)
 	.context("Unable to build scaler")?;
 
-	// Seek to 2 second into for the thumbnail
-	// TODO: Adjust this time?
-	let time = Duration::from_secs(2);
-	let time_us = i64::try_from(time.as_micros()).context("Time as micros did not fit into an `i64`")?;
-	let time_us = time_us.rescale(video::TIME_BASE_MICROS, video::TIME_BASE_AV);
-	input.seek(time_us, ..time_us).context("Unable to seek input")?;
+	// Try to take a thumbnail at specific times
+	let thumbnail_times = [
+		Duration::from_secs(2),
+		Duration::from_secs(1),
+		Duration::from_millis(500),
+		Duration::ZERO,
+	];
+	for thumbnail_time in thumbnail_times {
+		let time_us = i64::try_from(thumbnail_time.as_micros()).context("Time as micros did not fit into an `i64`")?;
+		let time_us = time_us.rescale(video::TIME_BASE_MICROS, video::TIME_BASE_AV);
+		input.seek(time_us, ..time_us).context("Unable to seek input")?;
 
-	for (stream, packet) in input.packets() {
-		if stream.index() != video_stream_idx {
-			continue;
+		for (stream, packet) in input.packets() {
+			if stream.index() != video_stream_idx {
+				continue;
+			}
+
+			decoder
+				.send_packet(&packet)
+				.context("Unable to send packet to decoder")?;
+
+			let mut frame_raw = ffmpeg_next::frame::Video::empty();
+			match decoder.receive_frame(&mut frame_raw) {
+				Ok(()) => (),
+				Err(ffmpeg_next::Error::Other { errno: libc::EAGAIN }) => continue,
+				Err(err) => return Err(AppError::new(&err).context("Decoder returned an error")),
+			}
+
+			// Get and adjust the pts
+			// TODO: What does it mean for a frame to not have a pts?
+			//       Should we be using dts instead?
+			let Some(pts_raw) = frame_raw.pts() else {
+				tracing::warn!("Frame had no pts, skipping");
+				continue;
+			};
+			let pts_us = pts_raw.rescale(video_stream_time_base, video::TIME_BASE_MICROS);
+			let Ok(pts_us) = u64::try_from(pts_us) else {
+				tracing::warn!("Frame pts was negative: {pts_us}, skipping");
+				continue;
+			};
+			let pts = Duration::from_micros(pts_us);
+
+			// If the frame is in the past, discard it
+			// Note: This can happen because the seeks aren't exact, and so
+			//       we might have been put a bit before our actual time.
+			let cur_time = thumbnail_time;
+			if pts < cur_time {
+				continue;
+			}
+
+			let mut frame = ffmpeg_next::frame::Video::empty();
+			scaler.run(&frame_raw, &mut frame).context("Unable to scale frame")?;
+
+			let width = frame.width() as usize;
+			let height = frame.height() as usize;
+			let mut pixels = Vec::with_capacity(width * height);
+
+			let data = frame.data(0);
+			let stride = frame.stride(0);
+			for y in 0..height {
+				let start = y * stride;
+				let data = &data[start..][..4 * width];
+				pixels.extend(data.iter().copied());
+			}
+
+			let image =
+				image::RgbaImage::from_vec(frame.width(), frame.height(), pixels).context("Image buffer was wrong")?;
+			return Ok(image.into());
 		}
-
-		decoder
-			.send_packet(&packet)
-			.context("Unable to send packet to decoder")?;
-
-		let mut frame_raw = ffmpeg_next::frame::Video::empty();
-		match decoder.receive_frame(&mut frame_raw) {
-			Ok(()) => (),
-			Err(ffmpeg_next::Error::Other { errno: libc::EAGAIN }) => continue,
-			Err(err) => return Err(AppError::new(&err).context("Decoder returned an error")),
-		}
-
-		// Get and adjust the pts
-		// TODO: What does it mean for a frame to not have a pts?
-		//       Should we be using dts instead?
-		let Some(pts_raw) = frame_raw.pts() else {
-			tracing::warn!("Frame had no pts, skipping");
-			continue;
-		};
-		let pts_us = pts_raw.rescale(video_stream_time_base, video::TIME_BASE_MICROS);
-		let Ok(pts_us) = u64::try_from(pts_us) else {
-			tracing::warn!("Frame pts was negative: {pts_us}, skipping");
-			continue;
-		};
-		let pts = Duration::from_micros(pts_us);
-
-		// If the frame is in the past, discard it
-		// Note: This can happen because the seeks aren't exact, and so
-		//       we might have been put a bit before our actual time.
-		let cur_time = time;
-		if pts < cur_time {
-			continue;
-		}
-
-		let mut frame = ffmpeg_next::frame::Video::empty();
-		scaler.run(&frame_raw, &mut frame).context("Unable to scale frame")?;
-
-		let width = frame.width() as usize;
-		let height = frame.height() as usize;
-		let mut pixels = Vec::with_capacity(width * height);
-
-		let data = frame.data(0);
-		let stride = frame.stride(0);
-		for y in 0..height {
-			let start = y * stride;
-			let data = &data[start..][..4 * width];
-			pixels.extend(data.iter().copied());
-		}
-
-		let image =
-			image::RgbaImage::from_vec(frame.width(), frame.height(), pixels).context("Image buffer was wrong")?;
-		return Ok(image.into());
 	}
 
-	// TODO: If the video is less than 2 seconds long this can happen, should
-	//       we just retry with less time?
+	// Note: If none of the times worked, the video really had no packets
 	app_error::bail!("Video had no packets");
 }
