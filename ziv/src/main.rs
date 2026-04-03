@@ -364,8 +364,8 @@ impl EguiApp {
 	}
 
 	/// Runs a script
-	fn run_script(&mut self, script: &Path, cur_entry: &CurEntry) -> Result<(), AppError> {
-		let entry_source = cur_entry.source();
+	fn run_script(&mut self, script: &Path, entry: &DirEntry) -> Result<(), AppError> {
+		let entry_source = entry.source();
 		let entry_path = match &entry_source {
 			EntrySource::Path(path) => path,
 			EntrySource::Zip(path) => path.archive_path(),
@@ -381,7 +381,7 @@ impl EguiApp {
 		Ok(())
 	}
 
-	fn reset_on_change_entry(&mut self, prev_entry: &CurEntry, new_entry: &CurEntry) {
+	fn reset_on_change_entry(&mut self, prev_entry: &DirEntry, new_entry: &CurEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
 			zoom:   0.0,
@@ -1371,7 +1371,7 @@ impl EguiApp {
 		});
 	}
 
-	fn draw_scripts(&mut self, ui: &mut egui::Ui, cur_entry: &CurEntry) {
+	fn draw_scripts(&mut self, ui: &mut egui::Ui, entry: &DirEntry) {
 		ui.menu_button("Scripts", |ui| {
 			if self.scripts.is_empty() {
 				ui.small("Any scripts in the script directory will show up here");
@@ -1385,7 +1385,7 @@ impl EguiApp {
 				};
 
 				if ui.button(name.to_string_lossy()).clicked() &&
-					let Err(err) = self.run_script(script, cur_entry)
+					let Err(err) = self.run_script(script, entry)
 				{
 					tracing::warn!("Unable to run script {script:?}: {err:?}");
 				}
