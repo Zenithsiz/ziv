@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::{EntryData, EntryImage, EntrySource, video},
-	crate::util::AppError,
+	crate::{dir_reader::ThumbnailProgressGuard, util::AppError},
 	app_error::{Context, app_error},
 	core::time::Duration,
 	ffmpeg_next::Rescale,
@@ -26,6 +26,7 @@ impl EntryThumbnail {
 		thumbnails_dir: &Path,
 		source: &EntrySource,
 		data: &EntryData,
+		thumbnail_progress: &mut ThumbnailProgressGuard,
 	) -> Result<Self, AppError> {
 		let entry_path = match source {
 			EntrySource::Path(path) => path.canonicalize().context("Unable to canonicalize path")?,
@@ -50,6 +51,7 @@ impl EntryThumbnail {
 			//       the user might only see new thumbnails when loading the image.
 			Ok(image) => (image, EntrySource::Path(thumbnail_path.into())),
 			Err(_) => {
+				thumbnail_progress.set_generating();
 				let (thumbnail, thumbnail_source) = match data {
 					EntryData::Image(image) => {
 						// If the image is thumbnail sized, just use it instead of generating a thumbnail

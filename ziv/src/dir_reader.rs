@@ -70,10 +70,14 @@ impl DirReader {
 			kind:    SortOrderKind::FileName,
 		};
 		let inner = Arc::new(Mutex::new(Inner {
-			entries:       Entries::new(sort_order),
-			sort_progress: None,
-			cur_entry:     None,
-			visitor:       None,
+			entries:            Entries::new(sort_order),
+			sort_progress:      None,
+			thumbnail_progress: ThumbnailProgress {
+				loading:    0,
+				generating: 0,
+			},
+			cur_entry:          None,
+			visitor:            None,
 		}));
 
 		#[cloned(inner)]
@@ -120,6 +124,18 @@ impl DirReader {
 	/// Returns whether a sorting is currently happening, as well as progress
 	pub fn sort_progress(&self) -> Option<SortProgress> {
 		self.inner.lock().sort_progress.clone()
+	}
+
+	/// Updates the thumbnail progress
+	///
+	/// See [`ThumbnailProgressGuard`] for details
+	pub fn thumbnail_progress_update(&self) -> ThumbnailProgressGuard {
+		ThumbnailProgressGuard::new(Arc::clone(&self.inner))
+	}
+
+	/// Returns whether any thumbnails are being generated, along with it's progress
+	pub fn thumbnail_progress(&self) -> ThumbnailProgress {
+		self.inner.lock().thumbnail_progress
 	}
 
 	/// Sets the sort order
@@ -251,7 +267,8 @@ impl DirReader {
 struct Inner {
 	entries: Entries,
 
-	sort_progress: Option<SortProgress>,
+	sort_progress:      Option<SortProgress>,
+	thumbnail_progress: ThumbnailProgress,
 
 	cur_entry: Option<CurEntry>,
 
@@ -507,6 +524,53 @@ impl Inner {
 pub struct SortProgress {
 	pub sorted: usize,
 	pub total:  usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ThumbnailProgress {
+	pub loading:    usize,
+	pub generating: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ThumbnailProgressGuard {
+	inner:         Arc<Mutex<Inner>>,
+	is_loading:    bool,
+	is_generating: bool,
+}
+
+impl ThumbnailProgressGuard {
+	const fn new(inner: Arc<Mutex<Inner>>) -> Self {
+		Self {
+			inner,
+			is_loading: false,
+			is_generating: false,
+		}
+	}
+
+	pub fn set_loading(&mut self) {
+		let mut inner = self.inner.lock();
+		inner.thumbnail_progress.loading += 1;
+		self.is_loading = true;
+	}
+
+	pub fn set_generating(&mut self) {
+		let mut inner = self.inner.lock();
+		inner.thumbnail_progress.generating += 1;
+		self.is_generating = true;
+	}
+}
+
+impl Drop for ThumbnailProgressGuard {
+	fn drop(&mut self) {
+		let mut inner = self.inner.lock();
+		if self.is_loading {
+			inner.thumbnail_progress.loading -= 1;
+		}
+		if self.is_generating {
+			inner.thumbnail_progress.generating -= 1;
+		}
+	}
 }
 
 #[derive(Clone, Debug, derive_more::Deref, derive_more::Into)]

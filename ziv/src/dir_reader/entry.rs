@@ -16,7 +16,7 @@ pub use self::{
 
 // Imports
 use {
-	super::{SortOrder, SortOrderKind},
+	super::{DirReader, SortOrder, SortOrderKind},
 	crate::util::{AppError, Loadable, PriorityThreadPool, defer, priority_thread_pool::Priority},
 	::image::ImageFormat,
 	app_error::Context,
@@ -202,17 +202,23 @@ impl DirEntry {
 	/// Returns this image's thumbnail
 	pub fn thumbnail(
 		&self,
+		dir_reader: &DirReader,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
 		thumbnails_dir: &Arc<Path>,
 	) -> Result<Option<EntryThumbnail>, AppError> {
+		let mut thumbnail_progress = dir_reader.thumbnail_progress_update();
+
 		#[cloned(this = self, egui_ctx, thumbnails_dir)]
 		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
 			defer! { egui_ctx.request_repaint() }
 
+			thumbnail_progress.set_loading();
+
 			let source = this.source();
 			let data = this.data_blocking().context("Unable to load data")?;
-			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data).context("Unable to create thumbnail")
+			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data, &mut thumbnail_progress)
+				.context("Unable to create thumbnail")
 		})
 	}
 }

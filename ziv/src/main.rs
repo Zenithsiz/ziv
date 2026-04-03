@@ -553,6 +553,17 @@ impl EguiApp {
 					write_str!(info, " Sorting {}/{}", sort_progress.sorted, sort_progress.total);
 				}
 
+				let thumbnail_progress = self.dir_reader.thumbnail_progress();
+				if thumbnail_progress.loading != 0 || thumbnail_progress.generating != 0 {
+					write_str!(info, "\nThumbnails:");
+					if thumbnail_progress.loading != 0 {
+						write_str!(info, " {} Loading", thumbnail_progress.loading);
+					}
+					if thumbnail_progress.generating != 0 {
+						write_str!(info, " {} Generating", thumbnail_progress.generating);
+					}
+				}
+
 				ui.label(info);
 			});
 	}
@@ -1530,8 +1541,12 @@ impl EguiApp {
 											NonMedia,
 										}
 										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
-											let Some(thumbnail) =
-												entry.thumbnail(&this.thread_pool, ui, this.thumbnails_dir())?
+											let Some(thumbnail) = entry.thumbnail(
+												&this.dir_reader,
+												&this.thread_pool,
+												ui,
+												this.thumbnails_dir(),
+											)?
 											else {
 												return Ok(None);
 											};
