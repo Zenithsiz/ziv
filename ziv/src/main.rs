@@ -1159,6 +1159,60 @@ impl EguiApp {
 		output
 	}
 
+	fn draw_image_context_menu(&mut self, entry: &DirEntry, response: &egui::Response) {
+		// TODO: Should we make this a native viewport?
+		// TODO: These errors should be popups, not logs.
+		egui::Popup::context_menu(response).show(|ui| {
+			if let EntrySource::Path(cur_entry_path) = entry.source() {
+				if ui.button("Open").clicked() &&
+					let Err(err) = opener::open(&*cur_entry_path)
+				{
+					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
+				}
+
+				if ui.button("Open in directory").clicked() &&
+					let Err(err) = opener::reveal(&cur_entry_path)
+				{
+					tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
+				}
+			}
+
+			ui.separator();
+
+			if let EntrySource::Path(cur_entry_path) = entry.source() {
+				if ui.button("Copy path").clicked() {
+					// TODO: Not copy a lossy string?
+					ui.send_cmd(egui::OutputCommand::CopyText(
+						cur_entry_path.to_string_lossy().into_owned(),
+					));
+				}
+			}
+
+			if ui.button("Copy file name").clicked() {
+				// TODO: Not copy a lossy string?
+				ui.send_cmd(egui::OutputCommand::CopyText(
+					entry
+						.file_name()
+						.expect("Entry had no file name")
+						.to_string_lossy()
+						.into_owned(),
+				));
+			}
+
+			ui.separator();
+
+			self.draw_sort_order(ui);
+
+			ui.separator();
+
+			if ui.button("Settings").clicked() {
+				self.settings_is_open = true;
+			}
+
+			self.draw_scripts(ui, entry);
+		});
+	}
+
 	fn draw_display_image(&mut self, ui: &mut egui::Ui) {
 		let mut fullscreen = false;
 		let mut move_prev = false;
@@ -1261,57 +1315,7 @@ impl EguiApp {
 				None => window_response,
 			};
 
-			// TODO: Should we make this a native viewport?
-			// TODO: These errors should be popups, not logs.
-			egui::Popup::context_menu(&response).show(|ui| {
-				if let EntrySource::Path(cur_entry_path) = cur_entry.source() {
-					if ui.button("Open").clicked() &&
-						let Err(err) = opener::open(&*cur_entry_path)
-					{
-						tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
-					}
-
-					if ui.button("Open in directory").clicked() &&
-						let Err(err) = opener::reveal(&cur_entry_path)
-					{
-						tracing::warn!("Unable to open file {:?}: {:?}", cur_entry_path, AppError::new(&err));
-					}
-				}
-
-				ui.separator();
-
-				if let EntrySource::Path(cur_entry_path) = cur_entry.source() {
-					if ui.button("Copy path").clicked() {
-						// TODO: Not copy a lossy string?
-						ui.send_cmd(egui::OutputCommand::CopyText(
-							cur_entry_path.to_string_lossy().into_owned(),
-						));
-					}
-				}
-
-				if ui.button("Copy file name").clicked() {
-					// TODO: Not copy a lossy string?
-					ui.send_cmd(egui::OutputCommand::CopyText(
-						cur_entry
-							.file_name()
-							.expect("Entry had no file name")
-							.to_string_lossy()
-							.into_owned(),
-					));
-				}
-
-				ui.separator();
-
-				self.draw_sort_order(ui);
-
-				ui.separator();
-
-				if ui.button("Settings").clicked() {
-					self.settings_is_open = true;
-				}
-
-				self.draw_scripts(ui, &cur_entry);
-			});
+			self.draw_image_context_menu(&cur_entry, &response);
 
 			draw_output
 		});
@@ -1575,6 +1579,8 @@ impl EguiApp {
 										if response.double_clicked() {
 											goto_entry = Some(entry.clone());
 										}
+
+										self.draw_image_context_menu(&entry, &response);
 
 										if let Ok(file_name) = entry.file_name() {
 											ui.centered_and_justified(|ui| {
