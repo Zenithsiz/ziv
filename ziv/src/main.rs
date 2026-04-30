@@ -42,7 +42,14 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{EntryData, EntrySource, EntryThumbnail, image::EntryImageTexture, video::PlayingStatus},
+			entry::{
+				EntryData,
+				EntrySource,
+				EntryThumbnail,
+				EntryThumbnails,
+				image::EntryImageTexture,
+				video::PlayingStatus,
+			},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -173,7 +180,7 @@ struct Controls {
 #[expect(clippy::struct_excessive_bools, reason = "TODO")]
 struct EguiApp {
 	config_path:              PathBuf,
-	dirs:                     Arc<Dirs>,
+	_dirs:                    Arc<Dirs>,
 	thread_pool:              PriorityThreadPool,
 	dir_reader:               DirReader,
 	next_frame_idx:           usize,
@@ -185,7 +192,6 @@ struct EguiApp {
 	shortcuts:                Shortcuts,
 	entries_per_row:          usize,
 	entries_per_row_changed:  bool,
-	thumbnails_dir:           Option<Arc<Path>>,
 	scripts_dir:              Option<Arc<Path>>,
 	scripts:                  Arc<[PathBuf]>,
 	running_scripts:          Vec<process::Child>,
@@ -213,6 +219,8 @@ struct EguiApp {
 	texture_options:  egui::TextureOptions,
 	#[debug(ignore)]
 	empty_image_data: egui::ImageData,
+
+	thumbnails: EntryThumbnails,
 }
 
 impl EguiApp {
@@ -232,10 +240,13 @@ impl EguiApp {
 			ctx:      cc.egui_ctx.clone(),
 		});
 
-		// Create some directories
+		// Setup the thumbnails
 		let thumbnails_dir = config.thumbnails_cache.map(Arc::from);
 		fs::create_dir_all(thumbnails_dir.as_ref().unwrap_or_else(|| dirs.thumbnails()))
 			.context("Unable to create thumbnails directory")?;
+		let thumbnails = EntryThumbnails::new(thumbnails_dir, Arc::clone(dirs.thumbnails()));
+
+		// Get the scripts
 		let scripts_dir = config.scripts_dir.map(Arc::from);
 		fs::create_dir_all(scripts_dir.as_ref().unwrap_or_else(|| dirs.scripts()))
 			.context("Unable to create scripts directory")?;
@@ -256,7 +267,7 @@ impl EguiApp {
 
 		Ok(Self {
 			config_path,
-			dirs,
+			_dirs: dirs,
 			thread_pool,
 			dir_reader,
 			next_frame_idx: 0,
@@ -270,7 +281,6 @@ impl EguiApp {
 			display_mode_switched: false,
 			loaded_entries: IndexSet::new(),
 			max_loaded_entries: 5,
-			thumbnails_dir,
 			scripts_dir,
 			scripts,
 			running_scripts: vec![],
@@ -296,18 +306,14 @@ impl EguiApp {
 			loading_entries: vec![],
 			texture_options: egui::TextureOptions::LINEAR,
 			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
+			thumbnails,
 		})
-	}
-
-	/// Gets the thumbnail directory
-	fn thumbnails_dir(&self) -> &Arc<Path> {
-		self.thumbnails_dir.as_ref().unwrap_or_else(|| self.dirs.thumbnails())
 	}
 
 	/// Saves the configuration
 	fn save_config(&self) -> Result<(), AppError> {
 		let config = Config {
-			thumbnails_cache: self.thumbnails_dir.as_deref().map(PathBuf::from),
+			thumbnails_cache: self.thumbnails.specified_dir().map(|dir| dir.to_path_buf()),
 			scripts_dir:      self.scripts_dir.as_deref().map(PathBuf::from),
 			preload:          [self.preload_prev, self.preload_next],
 			shortcuts:        self.shortcuts.clone(),
@@ -1501,6 +1507,7 @@ impl EguiApp {
 					ui.scroll_with_delta(egui::vec2(0.0, -100.0));
 				}
 
+				let mut thumbnails_visible = 0;
 				egui::Grid::new("display-list-entries")
 					.num_columns(self.entries_per_row)
 					.min_row_height(cell_size.y)
@@ -1517,6 +1524,8 @@ impl EguiApp {
 							};
 
 							for entry in entries {
+								thumbnails_visible += 1;
+
 								let hovered_id = egui::Id::new(("display-list-hover", &entry));
 
 								let hovered = ui.data(|data| data.get_temp(hovered_id)).unwrap_or(false);
@@ -1534,13 +1543,12 @@ impl EguiApp {
 											NonMedia,
 										}
 										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
-											let Some(thumbnail) = entry.thumbnail(
-												&this.dir_reader,
-												&this.thread_pool,
-												ui,
-												this.thumbnails_dir(),
-											)?
+											let Some(thumbnail) =
+												this.thumbnails.get(entry, &this.dir_reader, &this.thread_pool, ui)?
 											else {
+												ui.vertical_centered(|ui| {
+													ui.weak("Loading...");
+												});
 												return Ok(None);
 											};
 
@@ -1612,6 +1620,11 @@ impl EguiApp {
 							ui.end_row();
 						}
 					});
+
+				// Note: We set 2x the number of visible thumbnails so the user
+				//       can scroll back up a little without having to re-load
+				//       the thumbnails.
+				self.thumbnails.set_max(2 * thumbnails_visible);
 			});
 		});
 

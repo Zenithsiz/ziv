@@ -25,6 +25,7 @@ egui                  = { features = ["serde"], workspace = true }
 either                = { workspace = true }
 extend                = { workspace = true }
 ffmpeg-next           = { workspace = true }
+hashlink              = { workspace = true }
 humansize             = { workspace = true }
 image                 = { features = ["default-formats"], workspace = true }
 indexmap              = { workspace = true }

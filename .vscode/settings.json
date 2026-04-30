@@ -4,6 +4,7 @@
 		"eframe",
 		"egui",
 		"emath",
+		"hashlink",
 		"humansize",
 		"imageops",
 		"indexmap",

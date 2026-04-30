@@ -4,6 +4,7 @@
 pub mod image;
 pub mod source;
 pub mod thumbnail;
+pub mod thumbnails;
 pub mod video;
 
 // Exports
@@ -11,13 +12,14 @@ pub use self::{
 	image::EntryImage,
 	source::{EntrySource, EntrySourceZip},
 	thumbnail::EntryThumbnail,
+	thumbnails::EntryThumbnails,
 	video::EntryVideo,
 };
 
 // Imports
 use {
-	super::{DirReader, SortOrder, SortOrderKind},
-	crate::util::{AppError, Loadable, PriorityThreadPool, defer, priority_thread_pool::Priority},
+	super::{SortOrder, SortOrderKind},
+	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	::image::ImageFormat,
 	app_error::Context,
 	core::{cmp::Ordering, hash::Hash},
@@ -26,7 +28,7 @@ use {
 		ffi::OsStr,
 		fs,
 		io::{self, Read},
-		path::{Path, PathBuf},
+		path::PathBuf,
 		random,
 		sync::Arc,
 		time::SystemTime,
@@ -39,10 +41,9 @@ struct Inner {
 	source:    Mutex<EntrySource>,
 	file_type: EntryFileType,
 
-	metadata:  Loadable<EntryMetadata>,
-	data:      Loadable<EntryData>,
-	thumbnail: Loadable<EntryThumbnail>,
-	random:    Mutex<Option<u64>>,
+	metadata: Loadable<EntryMetadata>,
+	data:     Loadable<EntryData>,
+	random:   Mutex<Option<u64>>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +62,6 @@ impl DirEntry {
 			file_type,
 			metadata: Loadable::new(),
 			data,
-			thumbnail: Loadable::new(),
 			random: Mutex::new(None),
 		}))
 	}
@@ -194,32 +194,6 @@ impl DirEntry {
 		};
 
 		Ok(Some(metadata.size))
-	}
-}
-
-/// Thumbnail
-impl DirEntry {
-	/// Returns this image's thumbnail
-	pub fn thumbnail(
-		&self,
-		dir_reader: &DirReader,
-		thread_pool: &PriorityThreadPool,
-		egui_ctx: &egui::Context,
-		thumbnails_dir: &Arc<Path>,
-	) -> Result<Option<EntryThumbnail>, AppError> {
-		let mut thumbnail_progress = dir_reader.thumbnail_progress_update();
-
-		#[cloned(this = self, egui_ctx, thumbnails_dir)]
-		self.0.thumbnail.try_load(thread_pool, Priority::LOW, move || {
-			defer! { egui_ctx.request_repaint() }
-
-			thumbnail_progress.set_loading();
-
-			let source = this.source();
-			let data = this.data_blocking().context("Unable to load data")?;
-			EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data, &mut thumbnail_progress)
-				.context("Unable to create thumbnail")
-		})
 	}
 }
 
