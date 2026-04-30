@@ -3,7 +3,6 @@
 // Features
 #![feature(
 	proc_macro_hygiene,
-	once_cell_try,
 	stmt_expr_attributes,
 	try_blocks,
 	arbitrary_self_types,
@@ -14,18 +13,12 @@
 	path_is_empty,
 	yeet_expr,
 	impl_trait_in_assoc_type,
-	macro_derive,
 	yield_expr,
 	gen_blocks,
-	thread_sleep_until,
 	try_trait_v2,
 	try_trait_v2_residual,
 	never_type,
-	string_replace_in_place,
-	formatting_options,
-	if_let_guard,
 	try_trait_v2_yeet,
-	vec_peek_mut,
 	macro_metavar_expr_concat,
 	random
 )]
@@ -1468,7 +1461,7 @@ impl EguiApp {
 			let cell_frame = egui::Frame::NONE
 				.inner_margin(5)
 				.outer_margin(10)
-				.stroke(egui::Stroke::new(1.0, egui::Color32::TRANSPARENT))
+				.stroke(egui::Stroke::new(1.0_f32, egui::Color32::TRANSPARENT))
 				.fill(egui::Color32::from_rgba_premultiplied(0x10, 0x10, 0x10, 0xff))
 				.corner_radius(2);
 			let frame_size = cell_size - cell_frame.total_margin().sum();

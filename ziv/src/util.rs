@@ -15,7 +15,7 @@ use {
 		cmp,
 		convert::Infallible,
 		fmt::{self, Debug},
-		ops::{FromResidual, Try},
+		ops::{FromResidual, Residual, Try},
 		time::Duration,
 	},
 	image::DynamicImage,
@@ -205,6 +205,10 @@ impl<C, T, E> Try for TryControlFlow<C, T, E> {
 			Self::BreakErr(err) => core::ops::ControlFlow::Break(TryControlFlow::BreakErr(err)),
 		}
 	}
+}
+
+impl<C, T, E> Residual<C> for TryControlFlow<!, T, E> {
+	type TryType = TryControlFlow<C, T, E>;
 }
 
 impl<C, T, E> FromResidual<TryControlFlow<!, T, E>> for TryControlFlow<C, T, E> {
