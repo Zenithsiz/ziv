@@ -2,17 +2,17 @@
 
 // Modules
 pub mod image;
+pub mod loaded_thumbnails;
 pub mod source;
 pub mod thumbnail;
-pub mod thumbnails;
 pub mod video;
 
 // Exports
 pub use self::{
 	image::EntryImage,
+	loaded_thumbnails::EntryLoadedThumbnails,
 	source::{EntrySource, EntrySourceZip},
 	thumbnail::EntryThumbnail,
-	thumbnails::EntryThumbnails,
 	video::EntryVideo,
 };
 

@@ -13,11 +13,11 @@ use {
 };
 
 
-/// Entry thumbnails
+/// Entry loaded thumbnails
 ///
-/// Manages all thumbnails for every entry
+/// Manages all loaded thumbnails
 #[derive(Debug)]
-pub struct EntryThumbnails {
+pub struct EntryLoadedThumbnails {
 	thumbnails: LoadableLru<DirEntry, EntryThumbnail>,
 
 	// TODO: We shouldn't have to care about the specified/default
@@ -26,7 +26,7 @@ pub struct EntryThumbnails {
 	default_dir:   Arc<Path>,
 }
 
-impl EntryThumbnails {
+impl EntryLoadedThumbnails {
 	/// Creates the thumbnails, with none loaded
 	pub fn new(specified_dir: Option<Arc<Path>>, default_dir: Arc<Path>) -> Self {
 		Self {

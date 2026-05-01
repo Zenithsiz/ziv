@@ -44,9 +44,9 @@ use {
 			SortOrderKind,
 			entry::{
 				EntryData,
+				EntryLoadedThumbnails,
 				EntrySource,
 				EntryThumbnail,
-				EntryThumbnails,
 				image::EntryImageTexture,
 				video::PlayingStatus,
 			},
@@ -220,7 +220,7 @@ struct EguiApp {
 	#[debug(ignore)]
 	empty_image_data: egui::ImageData,
 
-	thumbnails: EntryThumbnails,
+	loaded_thumbnails: EntryLoadedThumbnails,
 }
 
 impl EguiApp {
@@ -244,7 +244,7 @@ impl EguiApp {
 		let thumbnails_dir = config.thumbnails_cache.map(Arc::from);
 		fs::create_dir_all(thumbnails_dir.as_ref().unwrap_or_else(|| dirs.thumbnails()))
 			.context("Unable to create thumbnails directory")?;
-		let thumbnails = EntryThumbnails::new(thumbnails_dir, Arc::clone(dirs.thumbnails()));
+		let loaded_thumbnails = EntryLoadedThumbnails::new(thumbnails_dir, Arc::clone(dirs.thumbnails()));
 
 		// Get the scripts
 		let scripts_dir = config.scripts_dir.map(Arc::from);
@@ -306,14 +306,14 @@ impl EguiApp {
 			loading_entries: vec![],
 			texture_options: egui::TextureOptions::LINEAR,
 			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
-			thumbnails,
+			loaded_thumbnails,
 		})
 	}
 
 	/// Saves the configuration
 	fn save_config(&self) -> Result<(), AppError> {
 		let config = Config {
-			thumbnails_cache: self.thumbnails.specified_dir().map(|dir| dir.to_path_buf()),
+			thumbnails_cache: self.loaded_thumbnails.specified_dir().map(|dir| dir.to_path_buf()),
 			scripts_dir:      self.scripts_dir.as_deref().map(PathBuf::from),
 			preload:          [self.preload_prev, self.preload_next],
 			shortcuts:        self.shortcuts.clone(),
@@ -1543,8 +1543,12 @@ impl EguiApp {
 											NonMedia,
 										}
 										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
-											let Some(thumbnail) =
-												this.thumbnails.get(entry, &this.dir_reader, &this.thread_pool, ui)?
+											let Some(thumbnail) = this.loaded_thumbnails.get(
+												entry,
+												&this.dir_reader,
+												&this.thread_pool,
+												ui,
+											)?
 											else {
 												ui.vertical_centered(|ui| {
 													ui.weak("Loading...");
@@ -1624,7 +1628,7 @@ impl EguiApp {
 				// Note: We set 2x the number of visible thumbnails so the user
 				//       can scroll back up a little without having to re-load
 				//       the thumbnails.
-				self.thumbnails.set_max(2 * thumbnails_visible);
+				self.loaded_thumbnails.set_max(2 * thumbnails_visible);
 			});
 		});
 
