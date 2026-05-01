@@ -4,29 +4,21 @@
 use {
 	super::{DirEntry, EntryThumbnail},
 	crate::{
-		dir_reader::{DirReader, ThumbnailProgressGuard},
-		util::{AppError, PriorityThreadPool, priority_thread_pool::Priority},
+		dir_reader::DirReader,
+		util::{AppError, LoadableLru, PriorityThreadPool, priority_thread_pool::Priority},
 	},
 	app_error::Context,
-	hashlink::LruCache,
-	parking_lot::{Mutex, MutexGuard},
 	std::{path::Path, sync::Arc},
 	zutil_cloned::cloned,
 };
 
-
-#[derive(Debug)]
-enum ThumbnailState {
-	Loading,
-	Loaded(Result<EntryThumbnail, AppError>),
-}
 
 /// Entry thumbnails
 ///
 /// Manages all thumbnails for every entry
 #[derive(Debug)]
 pub struct EntryThumbnails {
-	thumbnails: Arc<Mutex<LruCache<DirEntry, ThumbnailState>>>,
+	thumbnails: LoadableLru<DirEntry, EntryThumbnail>,
 
 	// TODO: We shouldn't have to care about the specified/default
 	//       and instead should just receive a single directory.
@@ -41,7 +33,7 @@ impl EntryThumbnails {
 			// Note: At the start, we allow an unbounded number of thumbnails,
 			//       since we'll only get resized after each frame, when the user
 			//       knows how many thumbnails they rendered.
-			thumbnails: Arc::new(Mutex::new(LruCache::new_unbounded())),
+			thumbnails: LoadableLru::new(usize::MAX),
 			specified_dir,
 			default_dir,
 		}
@@ -54,8 +46,7 @@ impl EntryThumbnails {
 
 	/// Sets the maximum number of thumbnails
 	pub fn set_max(&self, max: usize) {
-		let mut thumbnails = self.thumbnails.lock();
-		thumbnails.set_capacity(max);
+		self.thumbnails.set_max(max);
 	}
 
 	/// Gets an entry's thumbnail
@@ -66,52 +57,23 @@ impl EntryThumbnails {
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
 	) -> Result<Option<EntryThumbnail>, AppError> {
-		let mut thumbnails = self.thumbnails.lock();
-		match thumbnails.get(entry) {
-			Some(state) => match state {
-				ThumbnailState::Loading => Ok(None),
-				ThumbnailState::Loaded(res) => res.clone().map(Some),
-			},
-			None => {
-				let mut thumbnail_progress = dir_reader.thumbnail_progress_update();
-				thumbnail_progress.set_loading();
+		let thumbnails_dir = self.specified_dir.as_ref().unwrap_or(&self.default_dir);
+		self.thumbnails.get_or_load(entry, thread_pool, Priority::LOW, move || {
+			let mut thumbnail_progress = dir_reader.thumbnail_progress_update();
+			thumbnail_progress.set_loading();
 
-				let thumbnails_dir = Arc::clone(self.specified_dir.as_ref().unwrap_or(&self.default_dir));
+			#[cloned(egui_ctx, thumbnails_dir)]
+			move |entry: &DirEntry| {
+				let source = entry.source();
+				let data = entry.data_blocking().context("Unable to load data")?;
 
-				#[cloned(thumbnails = self.thumbnails, entry, egui_ctx)]
-				thread_pool.spawn(Priority::LOW, move || {
-					// If we aren't in the thumbnails anymore, then we're no longer relevant
-					// and we can skip loading
-					let mut thumbnails = thumbnails.lock();
-					if !thumbnails.contains_key(&entry) {
-						return;
-					}
-
-					// Note: Ensure we don't keep `shared` locked while loading
-					let res = MutexGuard::unlocked(&mut thumbnails, || {
-						self::load(&entry, &thumbnails_dir, &egui_ctx, &mut thumbnail_progress)
-					});
-
-					// Finally, update ourselves as loaded
-					thumbnails.insert(entry, ThumbnailState::Loaded(res));
-					egui_ctx.request_repaint();
-				});
-				thumbnails.insert(entry.clone(), ThumbnailState::Loading);
-
-				Ok(None)
-			},
-		}
+				// TODO: Requesting a repaint inside of this closure is the wrong
+				//       thing to do, since it's possible for that repaint to happen
+				//       before the thumbnail gets added to the lru.
+				EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data, &mut thumbnail_progress)
+					.inspect(|_| egui_ctx.request_repaint())
+					.context("Unable to create thumbnail")
+			}
+		})
 	}
-}
-
-fn load(
-	entry: &DirEntry,
-	thumbnails_dir: &Path,
-	egui_ctx: &egui::Context,
-	thumbnail_progress: &mut ThumbnailProgressGuard,
-) -> Result<EntryThumbnail, app_error::AppError> {
-	let source = entry.source();
-	let data = entry.data_blocking().context("Unable to load data")?;
-	EntryThumbnail::new(egui_ctx, thumbnails_dir, &source, &data, thumbnail_progress)
-		.context("Unable to create thumbnail")
 }

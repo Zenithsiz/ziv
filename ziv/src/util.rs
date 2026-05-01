@@ -3,10 +3,11 @@
 // Modules
 pub mod config;
 pub mod loadable;
+pub mod loadable_lru;
 pub mod priority_thread_pool;
 
 // Exports
-pub use self::{loadable::Loadable, priority_thread_pool::PriorityThreadPool};
+pub use self::{loadable::Loadable, loadable_lru::LoadableLru, priority_thread_pool::PriorityThreadPool};
 
 // Imports
 use {
