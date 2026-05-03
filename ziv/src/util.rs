@@ -5,9 +5,15 @@ pub mod config;
 pub mod loadable;
 pub mod loadable_lru;
 pub mod priority_thread_pool;
+pub mod smart_texture_handle;
 
 // Exports
-pub use self::{loadable::Loadable, loadable_lru::LoadableLru, priority_thread_pool::PriorityThreadPool};
+pub use self::{
+	loadable::Loadable,
+	loadable_lru::LoadableLru,
+	priority_thread_pool::PriorityThreadPool,
+	smart_texture_handle::SmartTextureHandle,
+};
 
 // Imports
 use {

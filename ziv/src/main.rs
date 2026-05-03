@@ -43,18 +43,11 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{
-				EntryData,
-				EntryLoadedThumbnails,
-				EntrySource,
-				EntryThumbnail,
-				image::EntryImageTexture,
-				video::PlayingStatus,
-			},
+			entry::{EntryData, EntryLoadedThumbnails, EntrySource, EntryThumbnail, video::PlayingStatus},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
-		util::{AppError, EguiTextureHandle, PriorityThreadPool, RectUtils},
+		util::{AppError, EguiTextureHandle, PriorityThreadPool, RectUtils, SmartTextureHandle},
 	},
 	app_error::Context,
 	clap::Parser,
@@ -459,10 +452,10 @@ impl EguiApp {
 		handle.set_partial([0, 0], self.empty_image_data.clone(), self.texture_options);
 	}
 
-	fn update_texture_options(&self, texture: &EntryImageTexture) {
+	fn update_texture_options(&self, texture: &SmartTextureHandle) {
 		match *texture {
-			EntryImageTexture::Simple(ref handle) => self.update_texture_options_handle(handle),
-			EntryImageTexture::Tiled {
+			SmartTextureHandle::Simple(ref handle) => self.update_texture_options_handle(handle),
+			SmartTextureHandle::Tiled {
 				tiles_width: _,
 				tiles_height: _,
 				ref tiles,
@@ -1116,7 +1109,7 @@ impl EguiApp {
 				self.draw_video_controls(ui, input, &video);
 
 				if prev_texture_options != self.texture_options {
-					self.update_texture_options(&EntryImageTexture::Simple(handle));
+					self.update_texture_options(&SmartTextureHandle::Simple(handle));
 				}
 			},
 
@@ -1540,7 +1533,7 @@ impl EguiApp {
 								let frame_res = cell_frame.show(ui, |ui| {
 									ui.vertical(|ui| {
 										enum Thumbnail {
-											Image(EntryImageTexture),
+											Image(SmartTextureHandle),
 											NonMedia,
 										}
 										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
