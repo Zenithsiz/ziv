@@ -2,6 +2,7 @@
 
 // Modules
 pub mod image;
+pub mod key;
 pub mod loaded_thumbnails;
 pub mod source;
 pub mod thumbnail;

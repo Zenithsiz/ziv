@@ -2,11 +2,10 @@
 
 // Imports
 use {
-	super::{DirEntry, SortOrder, SortOrderKind},
-	crate::util::{AppError, PartialEqOrd},
+	super::{DirEntry, SortOrder, SortOrderKind, entry::key},
+	crate::util::AppError,
 	app_error::Context,
 	core::ops::{Bound, IntoBounds},
-	std::{path::PathBuf, random, time::SystemTime},
 };
 
 dir_entry_wrappers! {
@@ -29,12 +28,12 @@ dir_entry_wrappers! {
 	range;
 	iter;
 
-	FileName(SortOrderFileName),
-	ModificationDate(SortOrderModificationDate),
-	Size(SortOrderSize),
-	ResolutionWidth(SortOrderResolutionWidth),
-	ResolutionHeight(SortOrderResolutionHeight),
-	Random(SortOrderRandom),
+	FileName,
+	ModificationDate,
+	Size,
+	ResolutionWidth,
+	ResolutionHeight,
+	Random,
 }
 
 macro dir_entry_wrappers {
@@ -59,14 +58,14 @@ macro dir_entry_wrappers {
 		$iter:ident;
 
 		$(
-			$SortOrderKind:ident($SortOrderTy:ty)
+			$SortOrderKind:ident
 		),*
 		$(,)?
 	) => {
 		#[derive(Debug)]
 		enum $Inner {
 			$(
-				$SortOrderKind(indexset::BTreeMap<$SortOrderTy, DirEntry>),
+				$SortOrderKind(indexset::BTreeMap<key::$SortOrderKind, DirEntry>),
 			)*
 		}
 
@@ -137,7 +136,7 @@ macro dir_entry_wrappers {
 				match &mut self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <$SortOrderTy>::new(&entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::new(&entry).context("Entry key was unloaded")?;
 							Ok(entries.insert(key, entry))
 						},
 					)*
@@ -149,7 +148,7 @@ macro dir_entry_wrappers {
 				match &mut self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <$SortOrderTy>::new(entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::new(entry).context("Entry key was unloaded")?;
 							Ok(entries.remove(&key))
 						},
 					)*
@@ -171,7 +170,7 @@ macro dir_entry_wrappers {
 				let idx = match &self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <$SortOrderTy>::new(entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::new(entry).context("Entry key was unloaded")?;
 							entries.rank(&key)
 						},
 					)*
@@ -241,7 +240,7 @@ macro dir_entry_wrappers {
 		#[derive(derive_more::From, derive_more::Debug)]
 		enum $RangeInner<'a> {
 			$(
-				$SortOrderKind(#[debug(ignore)] indexset::RangeMap<'a, $SortOrderTy, DirEntry>),
+				$SortOrderKind(#[debug(ignore)] indexset::RangeMap<'a, key::$SortOrderKind, DirEntry>),
 			)*
 		}
 
@@ -276,7 +275,7 @@ macro dir_entry_wrappers {
 		#[derive(derive_more::From, derive_more::Debug)]
 		enum $IterInner<'a> {
 			$(
-				$SortOrderKind(#[debug(ignore)] indexset::IterMap<'a, $SortOrderTy, DirEntry>),
+				$SortOrderKind(#[debug(ignore)] indexset::IterMap<'a, key::$SortOrderKind, DirEntry>),
 			)*
 		}
 
@@ -332,96 +331,6 @@ macro dir_entry_wrappers {
 		}
 	}
 }
-
-
-// TODO: Once we actually show directories, we need to ensure
-//       all of these sort directories before other files.
-
-// TODO: These shouldn't panic, and should instead return an error
-//       on missing data.
-
-#[derive(PartialEqOrd, Debug)]
-struct SortOrderFileName(PathBuf);
-
-impl Ord for SortOrderFileName {
-	fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-		natord::compare_iter(
-			self.0.as_os_str().as_encoded_bytes().iter(),
-			other.0.as_os_str().as_encoded_bytes().iter(),
-			|&c| c.is_ascii_whitespace(),
-			|&l, &r| l.cmp(r),
-			|&c| c.is_ascii_digit().then(|| isize::from(c - b'0')),
-		)
-	}
-}
-
-impl SortOrderFileName {
-	fn new(entry: &DirEntry) -> Result<Self, AppError> {
-		let file_name = entry.file_name().context("Unable to get file name")?;
-
-		Ok(Self(file_name))
-	}
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct SortOrderModificationDate(SystemTime);
-
-impl SortOrderModificationDate {
-	fn new(entry: &DirEntry) -> Result<Self, AppError> {
-		let modified_date = entry.modified_date_if_loaded()?.context("Missing modified date")?;
-
-		Ok(Self(modified_date))
-	}
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct SortOrderSize(u64);
-
-impl SortOrderSize {
-	fn new(entry: &DirEntry) -> Result<Self, AppError> {
-		let size = entry.size_if_loaded()?.context("Missing size")?;
-
-		Ok(Self(size))
-	}
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct SortOrderResolutionWidth(usize);
-
-impl SortOrderResolutionWidth {
-	fn new(entry: &DirEntry) -> Result<Self, AppError> {
-		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
-
-		Ok(Self(resolution.width))
-	}
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct SortOrderResolutionHeight(usize);
-
-impl SortOrderResolutionHeight {
-	fn new(entry: &DirEntry) -> Result<Self, AppError> {
-		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
-
-		Ok(Self(resolution.height))
-	}
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct SortOrderRandom(u64);
-
-impl SortOrderRandom {
-	#[expect(
-		clippy::unnecessary_wraps,
-		reason = "We want all sort orders to have the same signature"
-	)]
-	fn new(_entry: &DirEntry) -> Result<Self, AppError> {
-		let random = random::random(..);
-
-		Ok(Self(random))
-	}
-}
-
 
 fn iter_next<I: DoubleEndedIterator>(iter: &mut I, reverse: bool) -> Option<I::Item> {
 	match reverse {
