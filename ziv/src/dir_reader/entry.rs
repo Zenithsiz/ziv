@@ -19,6 +19,7 @@ pub use self::{
 
 // Imports
 use {
+	self::key::Key,
 	super::{SortOrder, SortOrderKind},
 	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	::image::ImageFormat,
@@ -222,40 +223,26 @@ impl DirEntry {
 impl DirEntry {
 	/// Returns if this entry is loaded for `order`
 	pub(super) fn is_loaded_for_order(&self, order: SortOrder) -> Result<bool, AppError> {
-		let is_loaded = match order.kind {
-			SortOrderKind::FileName | SortOrderKind::Random => true,
-			SortOrderKind::ModificationDate | SortOrderKind::Size => self.0.metadata.is_loaded(),
-			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => {
-				let Some(data) = self.0.data.try_get()? else {
-					return Ok(false);
-				};
-
-				match data {
-					EntryData::Image(image) => image.resolution_is_loaded(),
-					EntryData::Video(video) => video.resolution_is_loaded(),
-					EntryData::Other => true,
-				}
-			},
-		};
-
-		Ok(is_loaded)
+		match order.kind {
+			SortOrderKind::FileName => key::FileName::is_loaded(self),
+			SortOrderKind::ModificationDate => key::ModificationDate::is_loaded(self),
+			SortOrderKind::Size => key::Size::is_loaded(self),
+			SortOrderKind::ResolutionWidth => key::ResolutionWidth::is_loaded(self),
+			SortOrderKind::ResolutionHeight => key::ResolutionHeight::is_loaded(self),
+			SortOrderKind::Random => key::Random::is_loaded(self),
+		}
 	}
 
 	/// Loads the necessary fields for `order`
 	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
 		match order.kind {
-			SortOrderKind::FileName => _ = self.file_name().context("Unable to load file name")?,
-			SortOrderKind::ModificationDate => _ = self.modified_date_blocking()?,
-			SortOrderKind::Size => _ = self.size_blocking()?,
-			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => match self.data_blocking()? {
-				EntryData::Image(image) => _ = image.resolution_blocking()?,
-				EntryData::Video(video) => _ = video.resolution_blocking()?,
-				EntryData::Other => (),
-			},
-			SortOrderKind::Random => (),
+			SortOrderKind::FileName => key::FileName::load(self),
+			SortOrderKind::ModificationDate => key::ModificationDate::load(self),
+			SortOrderKind::Size => key::Size::load(self),
+			SortOrderKind::ResolutionWidth => key::ResolutionWidth::load(self),
+			SortOrderKind::ResolutionHeight => key::ResolutionHeight::load(self),
+			SortOrderKind::Random => key::Random::load(self),
 		}
-
-		Ok(())
 	}
 }
 

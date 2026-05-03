@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::DirEntry,
+	super::{DirEntry, EntryData},
 	crate::util::{AppError, PartialEqOrd},
 	app_error::Context,
 	std::{marker::ConstParamTy, path::PathBuf, random, time::SystemTime},
@@ -12,6 +12,12 @@ use {
 pub trait Key: Sized {
 	/// Creates a new key from an entry
 	fn from_entry(entry: &DirEntry) -> Result<Self, AppError>;
+
+	/// Returns if an entry is loaded for this key
+	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError>;
+
+	/// Loads this entry for this key
+	fn load(entry: &DirEntry) -> Result<(), AppError>;
 }
 
 // TODO: Once we actually show directories, we need to ensure
@@ -38,6 +44,14 @@ impl Key for FileName {
 
 		Ok(Self(file_name))
 	}
+
+	fn is_loaded(_entry: &DirEntry) -> Result<bool, AppError> {
+		Ok(true)
+	}
+
+	fn load(_entry: &DirEntry) -> Result<(), AppError> {
+		Ok(())
+	}
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -49,6 +63,15 @@ impl Key for ModificationDate {
 
 		Ok(Self(modified_date))
 	}
+
+	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError> {
+		Ok(entry.0.metadata.is_loaded())
+	}
+
+	fn load(entry: &DirEntry) -> Result<(), AppError> {
+		entry.modified_date_blocking()?;
+		Ok(())
+	}
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -59,6 +82,15 @@ impl Key for Size {
 		let size = entry.size_if_loaded()?.context("Missing size")?;
 
 		Ok(Self(size))
+	}
+
+	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError> {
+		Ok(entry.0.metadata.is_loaded())
+	}
+
+	fn load(entry: &DirEntry) -> Result<(), AppError> {
+		entry.size_blocking()?;
+		Ok(())
 	}
 }
 
@@ -86,6 +118,31 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 
 		Ok(Self(size))
 	}
+
+	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError> {
+		let Some(data) = entry.0.data.try_get()? else {
+			return Ok(false);
+		};
+
+		let is_loaded = match data {
+			EntryData::Image(image) => image.resolution_is_loaded(),
+			EntryData::Video(video) => video.resolution_is_loaded(),
+			EntryData::Other => true,
+		};
+
+		Ok(is_loaded)
+	}
+
+	fn load(entry: &DirEntry) -> Result<(), AppError> {
+		let data = entry.data_blocking()?;
+		match data {
+			EntryData::Image(image) => _ = image.resolution_blocking()?,
+			EntryData::Video(video) => _ = video.resolution_blocking()?,
+			EntryData::Other => (),
+		}
+
+		Ok(())
+	}
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -96,5 +153,13 @@ impl Key for Random {
 		let random = random::random(..);
 
 		Ok(Self(random))
+	}
+
+	fn is_loaded(_entry: &DirEntry) -> Result<bool, AppError> {
+		Ok(true)
+	}
+
+	fn load(_entry: &DirEntry) -> Result<(), AppError> {
+		Ok(())
 	}
 }
