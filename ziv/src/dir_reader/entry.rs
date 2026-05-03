@@ -22,14 +22,13 @@ use {
 	crate::util::{AppError, Loadable, PriorityThreadPool, priority_thread_pool::Priority},
 	::image::ImageFormat,
 	app_error::Context,
-	core::{cmp::Ordering, hash::Hash},
+	core::hash::Hash,
 	parking_lot::Mutex,
 	std::{
 		ffi::OsStr,
 		fs,
 		io::{self, Read},
 		path::PathBuf,
-		random,
 		sync::Arc,
 		time::SystemTime,
 	},
@@ -41,9 +40,12 @@ struct Inner {
 	source:    Mutex<EntrySource>,
 	file_type: EntryFileType,
 
+	// TODO: Should we keep these here?
+	//       Storing these means that when changing sort order
+	//       we don't need to re-read the files, but it also means
+	//       storing more data that might be unnecessary.
 	metadata: Loadable<EntryMetadata>,
 	data:     Loadable<EntryData>,
-	random:   Mutex<Option<u64>>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,7 +64,6 @@ impl DirEntry {
 			file_type,
 			metadata: Loadable::new(),
 			data,
-			random: Mutex::new(None),
 		}))
 	}
 }
@@ -161,7 +162,7 @@ impl DirEntry {
 	}
 
 	/// Gets the modified date, if loaded
-	fn modified_date_if_loaded(&self) -> Result<Option<SystemTime>, AppError> {
+	pub fn modified_date_if_loaded(&self) -> Result<Option<SystemTime>, AppError> {
 		let Some(metadata) = self.metadata_if_loaded()? else {
 			return Ok(None);
 		};
@@ -197,109 +198,31 @@ impl DirEntry {
 	}
 }
 
-/// Random
+/// Resolution
 impl DirEntry {
-	/// Resets the random seed of this entry.
-	pub fn reset_random(&self) {
-		*self.0.random.lock() = None;
+	/// Gets the resolution, if loaded
+	pub fn resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
+		let Some(data) = self.data_if_loaded()? else {
+			return Ok(None);
+		};
+
+		let resolution = match data {
+			EntryData::Image(image) => image.resolution_if_loaded()?,
+			EntryData::Video(video) => video.resolution_if_loaded()?,
+			// TODO: Is a resolution of 0 fine for these?
+			EntryData::Other => Some(EntryResolution { width: 0, height: 0 }),
+		};
+
+		Ok(resolution)
 	}
 }
 
 /// Misc.
 impl DirEntry {
-	/// Compares two directory entries according to a sort order.
-	///
-	/// # Equality
-	/// If the two are equal according to the sort order, they will
-	/// next be sorted by source.
-	///
-	/// # Directories
-	/// Directories will always be sorted *before* any other entries
-	pub(super) fn cmp_with(&self, other: &Self, order: SortOrder) -> Result<Ordering, AppError> {
-		let cmp = self.cmp_with_inner(other, order.kind)?;
-		let cmp = match cmp {
-			Ordering::Equal => self.source().cmp(&other.source()),
-			_ => cmp,
-		};
-
-		let order = match order.reverse {
-			true => cmp.reverse(),
-			false => cmp,
-		};
-
-		Ok(order)
-	}
-
-	/// Helper for [`Self::cmp_with`] that does not check for item equality
-	/// nor for reverse orders
-	fn cmp_with_inner(&self, other: &Self, order_kind: SortOrderKind) -> Result<Ordering, AppError> {
-		// Sort directories before files
-		match (self.file_type(), other.file_type()) {
-			(EntryFileType::Directory, EntryFileType::File) => return Ok(Ordering::Less),
-			(EntryFileType::File, EntryFileType::Directory) => return Ok(Ordering::Greater),
-			_ => (),
-		}
-
-		let cmp = match order_kind {
-			SortOrderKind::FileName => {
-				let lhs = self.file_name().context("Unable to get file name")?;
-				let rhs = other.file_name().context("Unable to get file name")?;
-				natord::compare_iter(
-					lhs.as_os_str().as_encoded_bytes().iter(),
-					rhs.as_os_str().as_encoded_bytes().iter(),
-					|&c| c.is_ascii_whitespace(),
-					|&l, &r| l.cmp(r),
-					|&c| c.is_ascii_digit().then(|| isize::from(c - b'0')),
-				)
-			},
-			SortOrderKind::ModificationDate => {
-				let lhs = self.modified_date_if_loaded()?.context("Missing modified date")?;
-				let rhs = other.modified_date_if_loaded()?.context("Missing modified date")?;
-
-				SystemTime::cmp(&lhs, &rhs)
-			},
-			SortOrderKind::Size => {
-				let lhs = self.size_if_loaded()?.context("Missing size")?;
-				let rhs = other.size_if_loaded()?.context("Missing size")?;
-
-				u64::cmp(&lhs, &rhs)
-			},
-			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => {
-				fn resolution(entry: &DirEntry) -> Result<EntryResolution, AppError> {
-					let data = entry.data_if_loaded()?.context("Missing data")?;
-					let resolution = match data {
-						EntryData::Image(image) => image.resolution_if_loaded()?.context("Missing resolution")?,
-						EntryData::Video(video) => video.resolution_if_loaded()?.context("Missing resolution")?,
-						// TODO: Is a resolution of 0 fine for these?
-						EntryData::Other => EntryResolution { width: 0, height: 0 },
-					};
-
-					Ok(resolution)
-				}
-
-				let lhs = resolution(self)?;
-				let rhs = resolution(other)?;
-				match order_kind {
-					SortOrderKind::ResolutionWidth => usize::cmp(&lhs.width, &rhs.width),
-					SortOrderKind::ResolutionHeight => usize::cmp(&lhs.height, &rhs.height),
-					_ => unreachable!(),
-				}
-			},
-			SortOrderKind::Random => {
-				let lhs = self.0.random.lock().context("Missing random")?;
-				let rhs = other.0.random.lock().context("Missing random")?;
-
-				u64::cmp(&lhs, &rhs)
-			},
-		};
-
-		Ok(cmp)
-	}
-
 	/// Returns if this entry is loaded for `order`
 	pub(super) fn is_loaded_for_order(&self, order: SortOrder) -> Result<bool, AppError> {
 		let is_loaded = match order.kind {
-			SortOrderKind::FileName => true,
+			SortOrderKind::FileName | SortOrderKind::Random => true,
 			SortOrderKind::ModificationDate | SortOrderKind::Size => self.0.metadata.is_loaded(),
 			SortOrderKind::ResolutionWidth | SortOrderKind::ResolutionHeight => {
 				let Some(data) = self.0.data.try_get()? else {
@@ -312,7 +235,6 @@ impl DirEntry {
 					EntryData::Other => true,
 				}
 			},
-			SortOrderKind::Random => self.0.random.lock().is_some(),
 		};
 
 		Ok(is_loaded)
@@ -329,12 +251,7 @@ impl DirEntry {
 				EntryData::Video(video) => _ = video.resolution_blocking()?,
 				EntryData::Other => (),
 			},
-			SortOrderKind::Random => {
-				let mut random = self.0.random.lock();
-				if random.is_none() {
-					*random = Some(random::random(..));
-				}
-			},
+			SortOrderKind::Random => (),
 		}
 
 		Ok(())

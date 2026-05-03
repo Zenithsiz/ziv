@@ -19,8 +19,8 @@
 	try_trait_v2_residual,
 	never_type,
 	try_trait_v2_yeet,
-	macro_metavar_expr_concat,
-	random
+	random,
+	macro_derive
 )]
 
 // Modules

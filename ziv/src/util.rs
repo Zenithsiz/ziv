@@ -324,3 +324,25 @@ pub impl egui::Context {
 		self.load_texture(name, image, options)
 	}
 }
+
+/// Implements `PartialEq` and `PartialOrd` in terms of `Ord`
+pub macro PartialEqOrd {
+	derive() (
+		$( #[$attr:meta] )*
+		$vis:vis struct $Name:ident $($rest:tt)*
+	) => {
+		impl PartialEq for $Name {
+			fn eq(&self, other: &Self) -> bool {
+				<Self as Ord>::cmp(self, other).is_eq()
+			}
+		}
+
+		impl Eq for $Name {}
+
+		impl PartialOrd for $Name {
+			fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+				Some(<Self as Ord>::cmp(self, other))
+			}
+		}
+	}
+}

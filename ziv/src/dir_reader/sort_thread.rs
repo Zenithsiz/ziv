@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{DirEntry, Entries, SortOrder, SortProgress},
+	super::{DirEntry, Entries, SortOrder, SortOrderKind, SortProgress},
 	core::mem,
 	parking_lot::Mutex,
 	std::{
@@ -86,17 +86,17 @@ impl SortThread {
 				},
 			},
 
-			// Note: When randomizing, we remove all entries and reset their random
+			// Note: When randomizing, we remove and re-insert all entries
 			Event::Randomize => {
 				let sort_order = inner.entries.sort_order();
-				let entries = mem::replace(&mut inner.entries, Entries::new(sort_order));
-				drop(inner);
-
-				entries
-					.into_iter()
-					.inspect(DirEntry::reset_random)
-					.chain(self.orphaned_entries.take().unwrap_or_default())
-					.collect::<Vec<_>>()
+				// Note: If we weren't already in a random order, then
+				//       there's no point in re-inserting all entries.
+				match sort_order.kind == SortOrderKind::Random {
+					true => mem::replace(&mut inner.entries, Entries::new(sort_order))
+						.into_iter()
+						.collect(),
+					false => vec![],
+				}
 			},
 		}
 	}

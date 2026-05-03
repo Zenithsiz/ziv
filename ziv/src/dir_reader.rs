@@ -418,7 +418,7 @@ impl Inner {
 	//       bugs elsewhere that assume the item exists
 	pub fn search(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<usize, AppError> {
 		self.load(entry)?;
-		let idx = self.entries.search(entry);
+		let idx = self.entries.search(entry).context("Entry wasn't loaded")?;
 
 		Ok(idx)
 	}
@@ -451,7 +451,7 @@ impl Inner {
 	/// Removes an entry
 	pub fn remove(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<bool, AppError> {
 		self.load(entry)?;
-		if !self.entries.remove(entry) {
+		if self.entries.remove(entry).context("Unable to remove entry")?.is_none() {
 			return Ok(false);
 		}
 
@@ -491,7 +491,7 @@ impl Inner {
 	/// Inserts an entry
 	pub fn insert(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<(), AppError> {
 		self.load(entry)?;
-		self.entries.insert(entry.clone());
+		self.entries.insert(entry.clone()).context("Unable to insert entry")?;
 
 		// TODO: Update the index instead of discarding it?
 		if let Some(cur_entry) = &mut self.cur_entry {

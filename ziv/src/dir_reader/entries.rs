@@ -3,9 +3,10 @@
 // Imports
 use {
 	super::{DirEntry, SortOrder, SortOrderKind},
+	crate::util::{AppError, PartialEqOrd},
+	app_error::Context,
 	core::ops::{Bound, IntoBounds},
-	ref_cast::RefCast,
-	std::borrow::Borrow,
+	std::{path::PathBuf, random, time::SystemTime},
 };
 
 dir_entry_wrappers! {
@@ -28,12 +29,12 @@ dir_entry_wrappers! {
 	range;
 	iter;
 
-	FileName,
-	ModificationDate,
-	Size,
-	ResolutionWidth,
-	ResolutionHeight,
-	Random,
+	FileName(SortOrderFileName),
+	ModificationDate(SortOrderModificationDate),
+	Size(SortOrderSize),
+	ResolutionWidth(SortOrderResolutionWidth),
+	ResolutionHeight(SortOrderResolutionHeight),
+	Random(SortOrderRandom),
 }
 
 macro dir_entry_wrappers {
@@ -58,14 +59,14 @@ macro dir_entry_wrappers {
 		$iter:ident;
 
 		$(
-			$SortOrderKind:ident
+			$SortOrderKind:ident($SortOrderTy:ty)
 		),*
 		$(,)?
 	) => {
 		#[derive(Debug)]
 		enum $Inner {
 			$(
-				$SortOrderKind(indexset::BTreeSet<${concat(DirEntry, $SortOrderKind)}>),
+				$SortOrderKind(indexset::BTreeMap<$SortOrderTy, DirEntry>),
 			)*
 		}
 
@@ -80,7 +81,7 @@ macro dir_entry_wrappers {
 			pub fn $new(sort_order: SortOrder) -> Self {
 				let inner = match sort_order.kind {
 					$(
-						SortOrderKind::$SortOrderKind => $Inner::$SortOrderKind(indexset::BTreeSet::new()),
+						SortOrderKind::$SortOrderKind => $Inner::$SortOrderKind(indexset::BTreeMap::new()),
 					)*
 				};
 
@@ -116,8 +117,8 @@ macro dir_entry_wrappers {
 			pub fn $first(&self) -> Option<&DirEntry> {
 				match &self.inner {
 					$( $Inner::$SortOrderKind(entries) => match self.reverse {
-						true => entries.last().map(AsRef::as_ref),
-						false => entries.first().map(AsRef::as_ref),
+						true => entries.last_key_value().map(|(_, entry)| entry),
+						false => entries.first_key_value().map(|(_, entry)| entry),
 					}, )*
 				}
 			}
@@ -125,23 +126,33 @@ macro dir_entry_wrappers {
 			pub fn $last(&self) -> Option<&DirEntry> {
 				match &self.inner {
 					$( $Inner::$SortOrderKind(entries) => match self.reverse {
-						true => entries.first().map(AsRef::as_ref),
-						false => entries.last().map(AsRef::as_ref),
+						true => entries.first_key_value().map(|(_, entry)| entry),
+						false => entries.last_key_value().map(|(_, entry)| entry),
 					}, )*
 				}
 			}
 
-			pub fn $insert(&mut self, entry: DirEntry) -> bool {
+			pub fn $insert(&mut self, entry: DirEntry) -> Result<Option<DirEntry>, AppError> {
 				// Note: We only check for reverse on access, so no need to do anything here
 				match &mut self.inner {
-					$( $Inner::$SortOrderKind(entries) => entries.insert(entry.into()), )*
+					$(
+						$Inner::$SortOrderKind(entries) => {
+							let key = <$SortOrderTy>::new(&entry).context("Entry key was unloaded")?;
+							Ok(entries.insert(key, entry))
+						},
+					)*
 				}
 			}
 
-			pub fn $remove(&mut self, entry: &DirEntry) -> bool {
+			pub fn $remove(&mut self, entry: &DirEntry) -> Result<Option<DirEntry>, AppError> {
 				// Note: We only check for reverse on access, so no need to do anything here
 				match &mut self.inner {
-					$( $Inner::$SortOrderKind(entries) => entries.remove(${concat(DirEntry, $SortOrderKind)}::ref_cast(entry)), )*
+					$(
+						$Inner::$SortOrderKind(entries) => {
+							let key = <$SortOrderTy>::new(entry).context("Entry key was unloaded")?;
+							Ok(entries.remove(&key))
+						},
+					)*
 				}
 			}
 
@@ -152,21 +163,28 @@ macro dir_entry_wrappers {
 				};
 
 				match &self.inner {
-					$( $Inner::$SortOrderKind(entries) => entries.get_index(idx).map(AsRef::as_ref), )*
+					$( $Inner::$SortOrderKind(entries) => entries.get_index(idx).map(|(_, entry)| entry), )*
 				}
 			}
 
-			pub fn $search(&self, entry: &DirEntry) -> usize {
+			pub fn $search(&self, entry: &DirEntry) -> Result<usize, AppError> {
 				let idx = match &self.inner {
-					$( $Inner::$SortOrderKind(entries) => entries.rank(${concat(DirEntry, $SortOrderKind)}::ref_cast(entry)), )*
+					$(
+						$Inner::$SortOrderKind(entries) => {
+							let key = <$SortOrderTy>::new(entry).context("Entry key was unloaded")?;
+							entries.rank(&key)
+						},
+					)*
 				};
 
-				match self.reverse {
+				let idx = match self.reverse {
 					// Note: If `idx == self.len`, this returns 0 instead, since
 					//       the rank of an element lower than any in the list is 0.
 					true => (self.$len() - idx).saturating_sub(1),
 					false => idx,
-				}
+				};
+
+				Ok(idx)
 			}
 
 			pub fn $range<R: IntoBounds<usize>>(&self, range: R) -> Option<Range<'_>> {
@@ -223,7 +241,7 @@ macro dir_entry_wrappers {
 		#[derive(derive_more::From, derive_more::Debug)]
 		enum $RangeInner<'a> {
 			$(
-				$SortOrderKind(#[debug(ignore)] indexset::Range<'a, ${concat(DirEntry, $SortOrderKind)}>),
+				$SortOrderKind(#[debug(ignore)] indexset::RangeMap<'a, $SortOrderTy, DirEntry>),
 			)*
 		}
 
@@ -239,7 +257,7 @@ macro dir_entry_wrappers {
 			fn next(&mut self) -> Option<Self::Item> {
 				match &mut self.iter {
 					$(
-						$RangeInner::$SortOrderKind(iter) => self::iter_next(iter, self.reverse).map(AsRef::as_ref),
+						$RangeInner::$SortOrderKind(iter) => self::iter_next(iter, self.reverse).map(|(_, entry)| entry),
 					)*
 				}
 			}
@@ -249,7 +267,7 @@ macro dir_entry_wrappers {
 			fn next_back(&mut self) -> Option<Self::Item> {
 				match &mut self.iter {
 					$(
-						$RangeInner::$SortOrderKind(iter) => self::iter_next_back(iter, self.reverse).map(AsRef::as_ref),
+						$RangeInner::$SortOrderKind(iter) => self::iter_next_back(iter, self.reverse).map(|(_, entry)| entry),
 					)*
 				}
 			}
@@ -258,7 +276,7 @@ macro dir_entry_wrappers {
 		#[derive(derive_more::From, derive_more::Debug)]
 		enum $IterInner<'a> {
 			$(
-				$SortOrderKind(#[debug(ignore)] indexset::Iter<'a, ${concat(DirEntry, $SortOrderKind)}>),
+				$SortOrderKind(#[debug(ignore)] indexset::IterMap<'a, $SortOrderTy, DirEntry>),
 			)*
 		}
 
@@ -274,7 +292,7 @@ macro dir_entry_wrappers {
 			fn next(&mut self) -> Option<Self::Item> {
 				match &mut self.iter {
 					$(
-						$IterInner::$SortOrderKind(iter) => self::iter_next(iter, self.reverse).map(AsRef::as_ref),
+						$IterInner::$SortOrderKind(iter) => self::iter_next(iter, self.reverse).map(|(_, entry)| entry),
 					)*
 				}
 			}
@@ -284,7 +302,7 @@ macro dir_entry_wrappers {
 			fn next_back(&mut self) -> Option<Self::Item> {
 				match &mut self.iter {
 					$(
-						$IterInner::$SortOrderKind(iter) => self::iter_next_back(iter, self.reverse).map(AsRef::as_ref),
+						$IterInner::$SortOrderKind(iter) => self::iter_next_back(iter, self.reverse).map(|(_, entry)| entry),
 					)*
 				}
 			}
@@ -300,7 +318,7 @@ macro dir_entry_wrappers {
 				let entries = match self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let iter = entries.into_iter().map(Into::into);
+							let iter = entries.into_values();
 							match self.reverse {
 								true => iter.rev().collect::<Vec<_>>(),
 								false => iter.collect(),
@@ -312,45 +330,98 @@ macro dir_entry_wrappers {
 				entries.into_iter()
 			}
 		}
-
-		$(
-			#[derive(ref_cast::RefCast, derive_more::From, derive_more::Into, derive_more::AsRef, Debug)]
-			#[repr(transparent)]
-			struct ${concat(DirEntry, $SortOrderKind)}(DirEntry);
-
-			impl Borrow<DirEntry> for ${concat(DirEntry, $SortOrderKind)} {
-				fn borrow(&self) -> &DirEntry {
-					&self.0
-				}
-			}
-
-			impl PartialEq for ${concat(DirEntry, $SortOrderKind)} {
-				fn eq(&self, other: &Self) -> bool {
-					self.cmp(other).is_eq()
-				}
-			}
-
-			impl Eq for ${concat(DirEntry, $SortOrderKind)} {}
-
-			impl PartialOrd for ${concat(DirEntry, $SortOrderKind)} {
-				fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-					Some(self.cmp(other))
-				}
-			}
-
-			impl Ord for ${concat(DirEntry, $SortOrderKind)} {
-				fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-					self.0
-						.cmp_with(&other.0, SortOrder {
-							reverse: false,
-							kind:    super::SortOrderKind::$SortOrderKind,
-						})
-						.expect("Entry wasn't loaded")
-				}
-			}
-		)*
 	}
 }
+
+
+// TODO: Once we actually show directories, we need to ensure
+//       all of these sort directories before other files.
+
+// TODO: These shouldn't panic, and should instead return an error
+//       on missing data.
+
+#[derive(PartialEqOrd, Debug)]
+struct SortOrderFileName(PathBuf);
+
+impl Ord for SortOrderFileName {
+	fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+		natord::compare_iter(
+			self.0.as_os_str().as_encoded_bytes().iter(),
+			other.0.as_os_str().as_encoded_bytes().iter(),
+			|&c| c.is_ascii_whitespace(),
+			|&l, &r| l.cmp(r),
+			|&c| c.is_ascii_digit().then(|| isize::from(c - b'0')),
+		)
+	}
+}
+
+impl SortOrderFileName {
+	fn new(entry: &DirEntry) -> Result<Self, AppError> {
+		let file_name = entry.file_name().context("Unable to get file name")?;
+
+		Ok(Self(file_name))
+	}
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct SortOrderModificationDate(SystemTime);
+
+impl SortOrderModificationDate {
+	fn new(entry: &DirEntry) -> Result<Self, AppError> {
+		let modified_date = entry.modified_date_if_loaded()?.context("Missing modified date")?;
+
+		Ok(Self(modified_date))
+	}
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct SortOrderSize(u64);
+
+impl SortOrderSize {
+	fn new(entry: &DirEntry) -> Result<Self, AppError> {
+		let size = entry.size_if_loaded()?.context("Missing size")?;
+
+		Ok(Self(size))
+	}
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct SortOrderResolutionWidth(usize);
+
+impl SortOrderResolutionWidth {
+	fn new(entry: &DirEntry) -> Result<Self, AppError> {
+		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
+
+		Ok(Self(resolution.width))
+	}
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct SortOrderResolutionHeight(usize);
+
+impl SortOrderResolutionHeight {
+	fn new(entry: &DirEntry) -> Result<Self, AppError> {
+		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
+
+		Ok(Self(resolution.height))
+	}
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct SortOrderRandom(u64);
+
+impl SortOrderRandom {
+	#[expect(
+		clippy::unnecessary_wraps,
+		reason = "We want all sort orders to have the same signature"
+	)]
+	fn new(_entry: &DirEntry) -> Result<Self, AppError> {
+		let random = random::random(..);
+
+		Ok(Self(random))
+	}
+}
+
 
 fn iter_next<I: DoubleEndedIterator>(iter: &mut I, reverse: bool) -> Option<I::Item> {
 	match reverse {
