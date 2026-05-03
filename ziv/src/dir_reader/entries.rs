@@ -2,7 +2,12 @@
 
 // Imports
 use {
-	super::{DirEntry, SortOrder, SortOrderKind, entry::key},
+	super::{
+		DirEntry,
+		SortOrder,
+		SortOrderKind,
+		entry::key::{self, Key},
+	},
 	crate::util::AppError,
 	app_error::Context,
 	core::ops::{Bound, IntoBounds},
@@ -136,7 +141,7 @@ macro dir_entry_wrappers {
 				match &mut self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <key::$SortOrderKind>::new(&entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::from_entry(&entry).context("Entry key was unloaded")?;
 							Ok(entries.insert(key, entry))
 						},
 					)*
@@ -148,7 +153,7 @@ macro dir_entry_wrappers {
 				match &mut self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <key::$SortOrderKind>::new(entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::from_entry(entry).context("Entry key was unloaded")?;
 							Ok(entries.remove(&key))
 						},
 					)*
@@ -170,7 +175,7 @@ macro dir_entry_wrappers {
 				let idx = match &self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <key::$SortOrderKind>::new(entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::from_entry(entry).context("Entry key was unloaded")?;
 							entries.rank(&key)
 						},
 					)*

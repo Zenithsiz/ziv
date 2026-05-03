@@ -8,6 +8,12 @@ use {
 	std::{path::PathBuf, random, time::SystemTime},
 };
 
+/// Sort key for a directory entry.
+pub trait Key: Sized {
+	/// Creates a new key from an entry
+	fn from_entry(entry: &DirEntry) -> Result<Self, AppError>;
+}
+
 // TODO: Once we actually show directories, we need to ensure
 //       all of these sort directories before other files.
 
@@ -26,8 +32,8 @@ impl Ord for FileName {
 	}
 }
 
-impl FileName {
-	pub fn new(entry: &DirEntry) -> Result<Self, AppError> {
+impl Key for FileName {
+	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
 		let file_name = entry.file_name().context("Unable to get file name")?;
 
 		Ok(Self(file_name))
@@ -37,8 +43,8 @@ impl FileName {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ModificationDate(SystemTime);
 
-impl ModificationDate {
-	pub fn new(entry: &DirEntry) -> Result<Self, AppError> {
+impl Key for ModificationDate {
+	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
 		let modified_date = entry.modified_date_if_loaded()?.context("Missing modified date")?;
 
 		Ok(Self(modified_date))
@@ -48,8 +54,8 @@ impl ModificationDate {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Size(u64);
 
-impl Size {
-	pub fn new(entry: &DirEntry) -> Result<Self, AppError> {
+impl Key for Size {
+	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
 		let size = entry.size_if_loaded()?.context("Missing size")?;
 
 		Ok(Self(size))
@@ -59,8 +65,8 @@ impl Size {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ResolutionWidth(usize);
 
-impl ResolutionWidth {
-	pub fn new(entry: &DirEntry) -> Result<Self, AppError> {
+impl Key for ResolutionWidth {
+	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
 		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
 
 		Ok(Self(resolution.width))
@@ -70,8 +76,8 @@ impl ResolutionWidth {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ResolutionHeight(usize);
 
-impl ResolutionHeight {
-	pub fn new(entry: &DirEntry) -> Result<Self, AppError> {
+impl Key for ResolutionHeight {
+	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
 		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
 
 		Ok(Self(resolution.height))
@@ -81,12 +87,8 @@ impl ResolutionHeight {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Random(u64);
 
-impl Random {
-	#[expect(
-		clippy::unnecessary_wraps,
-		reason = "We want all sort orders to have the same signature"
-	)]
-	pub fn new(_entry: &DirEntry) -> Result<Self, AppError> {
+impl Key for Random {
+	fn from_entry(_entry: &DirEntry) -> Result<Self, AppError> {
 		let random = random::random(..);
 
 		Ok(Self(random))
