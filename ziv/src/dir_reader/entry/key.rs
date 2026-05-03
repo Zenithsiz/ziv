@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{DirEntry, EntryData, EntryDisplay},
+	super::{DirEntry, EntryData, EntryDisplay, EntryLoadedDisplays},
 	crate::util::{AppError, PartialEqOrd},
 	app_error::Context,
 	std::{marker::ConstParamTy, path::PathBuf, random, time::SystemTime},
@@ -11,13 +11,13 @@ use {
 /// Sort key for a directory entry.
 pub trait Key: Sized {
 	/// Creates a new key from an entry
-	fn from_entry(entry: &DirEntry) -> Result<Self, AppError>;
+	fn from_entry(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<Self, AppError>;
 
 	/// Returns if an entry is loaded for this key
-	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError>;
+	fn is_loaded(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError>;
 
 	/// Loads this entry for this key
-	fn load(entry: &DirEntry) -> Result<(), AppError>;
+	fn load(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError>;
 }
 
 // TODO: Once we actually show directories, we need to ensure
@@ -39,17 +39,17 @@ impl Ord for FileName {
 }
 
 impl Key for FileName {
-	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
+	fn from_entry(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<Self, AppError> {
 		let file_name = entry.file_name().context("Unable to get file name")?;
 
 		Ok(Self(file_name))
 	}
 
-	fn is_loaded(_entry: &DirEntry) -> Result<bool, AppError> {
+	fn is_loaded(_entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError> {
 		Ok(true)
 	}
 
-	fn load(_entry: &DirEntry) -> Result<(), AppError> {
+	fn load(_entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
 		Ok(())
 	}
 }
@@ -58,17 +58,17 @@ impl Key for FileName {
 pub struct ModificationDate(SystemTime);
 
 impl Key for ModificationDate {
-	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
+	fn from_entry(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<Self, AppError> {
 		let modified_date = entry.modified_date_if_loaded()?.context("Missing modified date")?;
 
 		Ok(Self(modified_date))
 	}
 
-	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError> {
+	fn is_loaded(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError> {
 		Ok(entry.0.metadata.is_loaded())
 	}
 
-	fn load(entry: &DirEntry) -> Result<(), AppError> {
+	fn load(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
 		entry.modified_date_blocking()?;
 		Ok(())
 	}
@@ -78,17 +78,17 @@ impl Key for ModificationDate {
 pub struct Size(u64);
 
 impl Key for Size {
-	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
+	fn from_entry(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<Self, AppError> {
 		let size = entry.size_if_loaded()?.context("Missing size")?;
 
 		Ok(Self(size))
 	}
 
-	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError> {
+	fn is_loaded(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError> {
 		Ok(entry.0.metadata.is_loaded())
 	}
 
-	fn load(entry: &DirEntry) -> Result<(), AppError> {
+	fn load(entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
 		entry.size_blocking()?;
 		Ok(())
 	}
@@ -108,8 +108,10 @@ pub type ResolutionHeight = Resolution<{ ResolutionDir::Height }>;
 pub struct Resolution<const DIR: ResolutionDir>(usize);
 
 impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
-	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
-		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
+	fn from_entry(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<Self, AppError> {
+		let resolution = entry
+			.resolution_if_loaded(loaded_displays)?
+			.context("Missing resolution")?;
 
 		let size = match DIR {
 			ResolutionDir::Width => resolution.width,
@@ -119,15 +121,21 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 		Ok(Self(size))
 	}
 
-	fn is_loaded(entry: &DirEntry) -> Result<bool, AppError> {
+	fn is_loaded(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError> {
 		let Some(data) = entry.0.data.try_get()? else {
 			return Ok(false);
 		};
 
 		let is_loaded = match data {
-			EntryData::Display(display) => match display {
-				EntryDisplay::Image(image) => image.resolution_is_loaded(),
-				EntryDisplay::Video(video) => video.resolution_is_loaded(),
+			EntryData::Display(_) => {
+				let Some(display) = loaded_displays.get_if_loaded(entry)? else {
+					return Ok(false);
+				};
+
+				match display {
+					EntryDisplay::Image(image) => image.resolution_is_loaded(),
+					EntryDisplay::Video(video) => video.resolution_is_loaded(),
+				}
 			},
 			EntryData::Other => true,
 		};
@@ -135,10 +143,10 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 		Ok(is_loaded)
 	}
 
-	fn load(entry: &DirEntry) -> Result<(), AppError> {
+	fn load(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
 		let data = entry.data_blocking()?;
 		match data {
-			EntryData::Display(display) => match display {
+			EntryData::Display(_) => match loaded_displays.get_blocking(entry)? {
 				EntryDisplay::Image(image) => _ = image.resolution_blocking()?,
 				EntryDisplay::Video(video) => _ = video.resolution_blocking()?,
 			},
@@ -153,17 +161,17 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 pub struct Random(u64);
 
 impl Key for Random {
-	fn from_entry(_entry: &DirEntry) -> Result<Self, AppError> {
+	fn from_entry(_entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<Self, AppError> {
 		let random = random::random(..);
 
 		Ok(Self(random))
 	}
 
-	fn is_loaded(_entry: &DirEntry) -> Result<bool, AppError> {
+	fn is_loaded(_entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError> {
 		Ok(true)
 	}
 
-	fn load(_entry: &DirEntry) -> Result<(), AppError> {
+	fn load(_entry: &DirEntry, _loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
 		Ok(())
 	}
 }

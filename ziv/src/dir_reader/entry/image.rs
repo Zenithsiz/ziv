@@ -125,11 +125,6 @@ impl EntryImage {
 		self.inner.resolution.is_loaded()
 	}
 
-	/// Unloads this image
-	pub fn unload(&self) {
-		self.inner.texture.remove();
-	}
-
 	/// Returns this image's format
 	pub fn format(&self) -> ImageFormat {
 		self.inner.format

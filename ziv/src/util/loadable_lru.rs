@@ -6,7 +6,7 @@ use {
 	crate::util::{PriorityThreadPool, priority_thread_pool::Priority},
 	core::hash::Hash,
 	hashlink::LruCache,
-	parking_lot::{Mutex, MutexGuard},
+	parking_lot::{Condvar, Mutex, MutexGuard},
 	std::sync::Arc,
 	zutil_cloned::cloned,
 };
@@ -17,12 +17,18 @@ enum State<V, E> {
 	Loaded(Result<V, E>),
 }
 
+#[derive(Debug)]
+struct Inner<K, V, E> {
+	values:  Mutex<LruCache<K, State<V, E>>>,
+	condvar: Condvar,
+}
+
 /// Loadable map
 ///
 /// A lru of loadable values
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadableLru<K, V, E = AppError> {
-	values: Arc<Mutex<LruCache<K, State<V, E>>>>,
+	inner: Arc<Inner<K, V, E>>,
 }
 
 impl<K, V, E> LoadableLru<K, V, E>
@@ -32,14 +38,42 @@ where
 	/// Creates an lru with `capacity` capacity
 	pub fn new(capacity: usize) -> Self {
 		Self {
-			values: Arc::new(Mutex::new(LruCache::new(capacity))),
+			inner: Arc::new(Inner {
+				values:  Mutex::new(LruCache::new(capacity)),
+				condvar: Condvar::new(),
+			}),
 		}
 	}
 
 	/// Sets the maximum capacity for the lru
 	pub fn set_max(&self, max: usize) {
-		let mut values = self.values.lock();
+		let mut values = self.inner.values.lock();
 		values.set_capacity(max);
+	}
+
+	/// Gets a value by it's key or loads it by blocking
+	pub fn get_or_load_blocking<L>(&self, key: &K, loader: L) -> Result<V, E>
+	where
+		K: Clone,
+		V: Clone,
+		E: Clone,
+		L: Loader<K, V, E>,
+	{
+		let mut values = self.inner.values.lock();
+		loop {
+			match values.get(key) {
+				Some(state) => match state {
+					State::Loading => self.inner.condvar.wait(&mut values),
+					State::Loaded(value) => break value.clone(),
+				},
+				None => {
+					let res = loader.load(key);
+					values.insert(key.clone(), State::Loaded(res.clone()));
+					self.inner.condvar.notify_all();
+					break res;
+				},
+			}
+		}
 	}
 
 	/// Gets a value by it's key or starts loading it
@@ -57,7 +91,7 @@ where
 		L: IntoLoader<K, V, E>,
 		L::Loader: Send + 'static,
 	{
-		let mut values = self.values.lock();
+		let mut values = self.inner.values.lock();
 		match values.get(key) {
 			Some(state) => match state {
 				State::Loading => Ok(None),
@@ -66,11 +100,11 @@ where
 			None => {
 				let loader = loader.into_loader();
 
-				#[cloned(values = self.values, key)]
+				#[cloned(inner = self.inner, key)]
 				thread_pool.spawn(priority, move || {
 					// If we aren't in the values anymore, then we're no longer relevant
 					// and we can skip loading
-					let mut values = values.lock();
+					let mut values = inner.values.lock();
 					if !values.contains_key(&key) {
 						return;
 					}
@@ -80,11 +114,29 @@ where
 
 					// Finally, update ourselves as loaded
 					values.insert(key, State::Loaded(res));
+
+					inner.condvar.notify_all();
 				});
 				values.insert(key.clone(), State::Loading);
 
 				Ok(None)
 			},
+		}
+	}
+
+	/// Gets a value by it's key, if loaded
+	pub fn get(&self, key: &K) -> Result<Option<V>, E>
+	where
+		V: Clone,
+		E: Clone,
+	{
+		let mut values = self.inner.values.lock();
+		match values.get(key) {
+			Some(state) => match state {
+				State::Loading => Ok(None),
+				State::Loaded(value) => value.clone().map(Some),
+			},
+			None => Ok(None),
 		}
 	}
 }

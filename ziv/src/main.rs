@@ -46,6 +46,7 @@ use {
 			entry::{
 				EntryData,
 				EntryDisplay,
+				EntryLoadedDisplays,
 				EntryLoadedThumbnails,
 				EntrySource,
 				EntryThumbnail,
@@ -67,7 +68,6 @@ use {
 		Widget,
 		emath::{self, GuiRounding},
 	},
-	indexmap::IndexSet,
 	itertools::Itertools,
 	std::{
 		fmt::Write,
@@ -209,11 +209,6 @@ struct EguiApp {
 	preload_prev: usize,
 	preload_next: usize,
 
-	/// Entries we're loaded
-	// TODO: We need a better solution than this
-	loaded_entries: IndexSet<DirEntry>,
-	max_loaded_entries: usize,
-
 	new_entry_rx:    mpsc::Receiver<DirEntry>,
 	loading_entries: Vec<DirEntry>,
 
@@ -222,6 +217,7 @@ struct EguiApp {
 	empty_image_data: egui::ImageData,
 
 	loaded_thumbnails: EntryLoadedThumbnails,
+	loaded_displays:   EntryLoadedDisplays,
 }
 
 impl EguiApp {
@@ -234,7 +230,10 @@ impl EguiApp {
 		thread_pool: PriorityThreadPool,
 		path: PathBuf,
 	) -> Result<Self, AppError> {
-		let dir_reader = DirReader::new(path).context("Unable to create directory reader")?;
+		// TODO: We need to update the displays capacity whenever the preload changes
+		let loaded_displays = EntryLoadedDisplays::new(1 + config.preload[0] + config.preload[1]);
+
+		let dir_reader = DirReader::new(path, loaded_displays.clone()).context("Unable to create directory reader")?;
 		let (new_entry_tx, new_entry_rx) = mpsc::channel();
 		dir_reader.set_visitor(DirReaderVisitor {
 			entry_tx: new_entry_tx,
@@ -280,8 +279,6 @@ impl EguiApp {
 			view_mode: ViewMode::FitWindow,
 			display_mode: DisplayMode::Image,
 			display_mode_switched: false,
-			loaded_entries: IndexSet::new(),
-			max_loaded_entries: 5,
 			scripts_dir,
 			scripts,
 			running_scripts: vec![],
@@ -308,6 +305,7 @@ impl EguiApp {
 			texture_options: egui::TextureOptions::LINEAR,
 			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
 			loaded_thumbnails,
+			loaded_displays,
 		})
 	}
 
@@ -329,14 +327,13 @@ impl EguiApp {
 		util::config::save(&config, &self.config_path)
 	}
 
-	fn remove_entry(&mut self, entry: &DirEntry) {
+	fn remove_entry(&self, entry: &DirEntry) {
 		// Note: An error here only happens if the entry wasn't already in
 		//       the list and it failed to be loaded, so either way it's no
 		//       longer on the list and thus we're fine to just log and continue
 		if let Err(err) = self.dir_reader.remove(entry) {
 			tracing::warn!("Unable to remove entry {:?}: {err:?}", entry.source().name());
 		}
-		self.loaded_entries.shift_remove(entry);
 	}
 
 	// TODO: Not have to pass `&mut Self` here
@@ -381,75 +378,18 @@ impl EguiApp {
 		Ok(())
 	}
 
-	fn reset_on_change_entry(&mut self, prev_entry: &DirEntry, new_entry: &CurEntry) {
+	fn reset_on_change_entry(&mut self, prev_entry: &DirEntry, _new_entry: &CurEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
 			zoom:   0.0,
 		};
 		self.resized_image = false;
 
-		if let Some(EntryData::Display(EntryDisplay::Video(video))) =
-			self.try_with_entry(prev_entry, |_, prev_entry| prev_entry.data_if_loaded()) &&
-			video.set_offscreen()
+		if let Some(EntryDisplay::Video(video)) = self.try_with_entry(prev_entry, |this, prev_entry| {
+			this.loaded_displays.get_if_loaded(prev_entry)
+		}) && video.set_offscreen()
 		{
 			video.pause();
-		}
-
-		if self.loaded_entries.len() > self.max_loaded_entries {
-			// Try to get the indices or all entries (including the new)
-			let idxs: Option<_> = try {
-				let new_idx = new_entry.idx?;
-
-				// TODO: Don't ignore errors here?
-				// TODO: This could be somewhat expensive, can we
-				//       cache this somehow?
-				let entry_idxs = self
-					.loaded_entries
-					.iter()
-					.map(|entry| self.dir_reader.idx_of(entry).ok())
-					.collect::<Option<Vec<_>>>()?;
-
-				(new_idx, entry_idxs)
-			};
-
-			// Then choose which entry to remove
-			let to_remove_loaded_idx = match idxs {
-				// If we have all the indices, select the furthest one
-				Some((new_idx, entry_idxs)) => entry_idxs
-					.iter()
-					.position_max_by_key(|entry_idx| entry_idx.abs_diff(new_idx))
-					.expect("Just checked it wasn't empty"),
-
-				// If we don't have all the indices, there's a re-order
-				// happening right now, so we just conservatively remove
-				// the oldest item
-				// Note: The current entry cannot be the oldest because we
-				//       just inserted, so this is guaranteed to not be our
-				//       current entry
-				None => 0,
-			};
-
-			// Finally remove it from the loaded entries and remove it's texture
-			let entry = self
-				.loaded_entries
-				.shift_remove_index(to_remove_loaded_idx)
-				.expect("Just checked it wasn't empty");
-
-			self.with_entry(&entry, |_, entry| {
-				let Some(data) = entry.data_if_loaded()? else {
-					return Ok(());
-				};
-
-				match data {
-					EntryData::Display(display) => match display {
-						EntryDisplay::Image(image) => image.unload(),
-						EntryDisplay::Video(video) => video.stop(),
-					},
-					EntryData::Other => (),
-				}
-
-				Ok(())
-			});
 		}
 	}
 
@@ -489,29 +429,34 @@ impl EguiApp {
 
 		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) {
 			match data {
-				EntryData::Display(display) => match display {
-					EntryDisplay::Image(image) => {
-						if let Some(resolution) =
-							self.try_with_entry(cur_entry, |this, _| image.resolution_load(&this.thread_pool))
-						{
-							write_str!(title, " {}x{}", resolution.width, resolution.height);
-						}
+				EntryData::Display(_) =>
+					if let Some(display) = self.try_with_entry(cur_entry, |this, cur_entry| {
+						this.loaded_displays.get_if_loaded(cur_entry)
+					}) {
+						match display {
+							EntryDisplay::Image(image) => {
+								if let Some(resolution) =
+									self.try_with_entry(cur_entry, |this, _| image.resolution_load(&this.thread_pool))
+								{
+									write_str!(title, " {}x{}", resolution.width, resolution.height);
+								}
 
-						let format = image.format();
-						write_str!(title, " ({format:?})");
-					},
-					EntryDisplay::Video(video) => {
-						if let Some(resolution) =
-							self.try_with_entry(cur_entry, |this, _| video.resolution_load(&this.thread_pool))
-						{
-							write_str!(title, " {}x{}", resolution.width, resolution.height);
-						}
+								let format = image.format();
+								write_str!(title, " ({format:?})");
+							},
+							EntryDisplay::Video(video) => {
+								if let Some(resolution) =
+									self.try_with_entry(cur_entry, |this, _| video.resolution_load(&this.thread_pool))
+								{
+									write_str!(title, " {}x{}", resolution.width, resolution.height);
+								}
 
-						if let Some(duration) = video.duration() {
-							write_str!(title, " ({duration:.2?})");
+								if let Some(duration) = video.duration() {
+									write_str!(title, " ({duration:.2?})");
+								}
+							},
 						}
 					},
-				},
 				EntryData::Other => self.remove_entry(cur_entry),
 			}
 		}
@@ -1004,31 +949,32 @@ impl EguiApp {
 
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
 		self.with_entry(entry, |this, entry| try {
-			let Some(data) = entry
-				.data_load(&this.thread_pool)
-				.context("Unable to load entry data")?
-			else {
+			let Some(data) = entry.data_load(&this.thread_pool)? else {
 				return Ok(());
 			};
 
 			match data {
-				EntryData::Display(display) => match display {
-					EntryDisplay::Image(image) => image
-						.load(&this.thread_pool, egui_ctx)
-						.context("Unable to load image")?,
-					EntryDisplay::Video(video) =>
-						if !video.started() {
-							// TODO: Pausing the video here means we aren't actually
-							//       preloading almost anything, just the thread initializing,
-							//       we should make it so a single frame gets rendered here.
-							video.pause();
-							video.start(egui_ctx.clone());
-						},
+				EntryData::Display(_) => {
+					let Some(display) = this.loaded_displays.get(entry, &this.thread_pool)? else {
+						return Ok(());
+					};
+
+					match display {
+						EntryDisplay::Image(image) => image
+							.load(&this.thread_pool, egui_ctx)
+							.context("Unable to load image")?,
+						EntryDisplay::Video(video) =>
+							if !video.started() {
+								// TODO: Pausing the video here means we aren't actually
+								//       preloading almost anything, just the thread initializing,
+								//       we should make it so a single frame gets rendered here.
+								video.pause();
+								video.start(egui_ctx.clone());
+							},
+					}
 				},
 				EntryData::Other => this.remove_entry(entry),
 			}
-
-			this.loaded_entries.insert(entry.clone());
 		});
 	}
 
@@ -1045,10 +991,6 @@ impl EguiApp {
 			self.vertical_pan_smooth = 0.0;
 		}
 
-		// Note: It's important we add the entry to the loaded *before*
-		//       calling `try_data`, because otherwise we'd potentially
-		//       miss it.
-		self.loaded_entries.insert(input.entry.clone().into());
 		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.data_load(&this.thread_pool)) else {
 			ui.centered_and_justified(|ui| {
 				ui.weak("Loading...");
@@ -1071,8 +1013,16 @@ impl EguiApp {
 			self.preload_entry(ui, &entry);
 		}
 
-		let EntryData::Display(display) = data else {
+		let EntryData::Display(_) = data else {
 			self.remove_entry(input.entry);
+			return output;
+		};
+		let Some(display) = self.try_with_entry(input.entry, |this, entry| {
+			this.loaded_displays.get(entry, &this.thread_pool)
+		}) else {
+			ui.centered_and_justified(|ui| {
+				ui.weak("Loading...");
+			});
 			return output;
 		};
 
@@ -1430,9 +1380,9 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Some(EntryData::Display(EntryDisplay::Video(video))) =
-				self.try_with_entry(&cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) &&
-			video.set_offscreen()
+			let Some(EntryDisplay::Video(video)) = self.try_with_entry(&cur_entry, |this, cur_entry| {
+				this.loaded_displays.get_if_loaded(cur_entry)
+			}) && video.set_offscreen()
 		{
 			video.pause();
 		}

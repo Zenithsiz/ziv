@@ -138,7 +138,7 @@ impl ReadThread {
 			.context("Unable to read path")?;
 		{
 			let mut inner = self.inner.lock();
-			inner.entries.insert(entry.clone()).context("Unable to insert entry")?;
+			inner.insert(&entry).context("Unable to insert entry")?;
 			inner.cur_entry = Some(CurEntry { entry, idx: None });
 		}
 

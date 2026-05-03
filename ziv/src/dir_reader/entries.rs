@@ -6,7 +6,10 @@ use {
 		DirEntry,
 		SortOrder,
 		SortOrderKind,
-		entry::key::{self, Key},
+		entry::{
+			EntryLoadedDisplays,
+			key::{self, Key},
+		},
 	},
 	crate::util::AppError,
 	app_error::Context,
@@ -136,24 +139,24 @@ macro dir_entry_wrappers {
 				}
 			}
 
-			pub fn $insert(&mut self, entry: DirEntry) -> Result<Option<DirEntry>, AppError> {
+			pub fn $insert(&mut self, entry: DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<Option<DirEntry>, AppError> {
 				// Note: We only check for reverse on access, so no need to do anything here
 				match &mut self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <key::$SortOrderKind>::from_entry(&entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::from_entry(&entry, loaded_displays).context("Entry key was unloaded")?;
 							Ok(entries.insert(key, entry))
 						},
 					)*
 				}
 			}
 
-			pub fn $remove(&mut self, entry: &DirEntry) -> Result<Option<DirEntry>, AppError> {
+			pub fn $remove(&mut self, entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<Option<DirEntry>, AppError> {
 				// Note: We only check for reverse on access, so no need to do anything here
 				match &mut self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <key::$SortOrderKind>::from_entry(entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::from_entry(entry, loaded_displays).context("Entry key was unloaded")?;
 							Ok(entries.remove(&key))
 						},
 					)*
@@ -171,11 +174,11 @@ macro dir_entry_wrappers {
 				}
 			}
 
-			pub fn $search(&self, entry: &DirEntry) -> Result<usize, AppError> {
+			pub fn $search(&self, entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<usize, AppError> {
 				let idx = match &self.inner {
 					$(
 						$Inner::$SortOrderKind(entries) => {
-							let key = <key::$SortOrderKind>::from_entry(entry).context("Entry key was unloaded")?;
+							let key = <key::$SortOrderKind>::from_entry(entry, loaded_displays).context("Entry key was unloaded")?;
 							entries.rank(&key)
 						},
 					)*

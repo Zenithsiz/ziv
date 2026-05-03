@@ -120,7 +120,7 @@ impl EntryVideo {
 	}
 
 	/// Stops the video
-	pub fn stop(&self) {
+	pub fn _stop(&self) {
 		let mut state = self.inner.state.lock();
 		if matches!(state.thread_status, DecoderThreadStatus::Started) {
 			state.thread_status = DecoderThreadStatus::Stopping;

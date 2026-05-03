@@ -54,7 +54,7 @@ impl<T, E> Loadable<T, E> {
 	}
 
 	/// Removes the value and the task loading it, if any
-	pub fn remove(&self) {
+	pub fn _remove(&self) {
 		let mut inner = self.inner.lock();
 		inner.value = None;
 		inner.task_rx = None;

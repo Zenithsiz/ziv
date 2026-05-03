@@ -3,6 +3,7 @@
 // Modules
 pub mod image;
 pub mod key;
+pub mod loaded_displays;
 pub mod loaded_thumbnails;
 pub mod source;
 pub mod thumbnail;
@@ -11,6 +12,7 @@ pub mod video;
 // Exports
 pub use self::{
 	image::EntryImage,
+	loaded_displays::EntryLoadedDisplays,
 	loaded_thumbnails::EntryLoadedThumbnails,
 	source::{EntrySource, EntrySourceZip},
 	thumbnail::EntryThumbnail,
@@ -203,15 +205,23 @@ impl DirEntry {
 /// Resolution
 impl DirEntry {
 	/// Gets the resolution, if loaded
-	pub fn resolution_if_loaded(&self) -> Result<Option<EntryResolution>, AppError> {
+	pub fn resolution_if_loaded(
+		&self,
+		loaded_displays: &EntryLoadedDisplays,
+	) -> Result<Option<EntryResolution>, AppError> {
 		let Some(data) = self.data_if_loaded()? else {
 			return Ok(None);
 		};
 
 		let resolution = match data {
-			EntryData::Display(display) => match display {
-				EntryDisplay::Image(image) => image.resolution_if_loaded()?,
-				EntryDisplay::Video(video) => video.resolution_if_loaded()?,
+			EntryData::Display(_) => {
+				let Some(display) = loaded_displays.get_if_loaded(self)? else {
+					return Ok(None);
+				};
+				match display {
+					EntryDisplay::Image(image) => image.resolution_if_loaded()?,
+					EntryDisplay::Video(video) => video.resolution_if_loaded()?,
+				}
 			},
 			// TODO: Is a resolution of 0 fine for these?
 			EntryData::Other => Some(EntryResolution { width: 0, height: 0 }),
@@ -224,26 +234,34 @@ impl DirEntry {
 /// Misc.
 impl DirEntry {
 	/// Returns if this entry is loaded for `order`
-	pub(super) fn is_loaded_for_order(&self, order: SortOrder) -> Result<bool, AppError> {
+	pub(super) fn is_loaded_for_order(
+		&self,
+		order: SortOrder,
+		loaded_displays: &EntryLoadedDisplays,
+	) -> Result<bool, AppError> {
 		match order.kind {
-			SortOrderKind::FileName => key::FileName::is_loaded(self),
-			SortOrderKind::ModificationDate => key::ModificationDate::is_loaded(self),
-			SortOrderKind::Size => key::Size::is_loaded(self),
-			SortOrderKind::ResolutionWidth => key::ResolutionWidth::is_loaded(self),
-			SortOrderKind::ResolutionHeight => key::ResolutionHeight::is_loaded(self),
-			SortOrderKind::Random => key::Random::is_loaded(self),
+			SortOrderKind::FileName => key::FileName::is_loaded(self, loaded_displays),
+			SortOrderKind::ModificationDate => key::ModificationDate::is_loaded(self, loaded_displays),
+			SortOrderKind::Size => key::Size::is_loaded(self, loaded_displays),
+			SortOrderKind::ResolutionWidth => key::ResolutionWidth::is_loaded(self, loaded_displays),
+			SortOrderKind::ResolutionHeight => key::ResolutionHeight::is_loaded(self, loaded_displays),
+			SortOrderKind::Random => key::Random::is_loaded(self, loaded_displays),
 		}
 	}
 
 	/// Loads the necessary fields for `order`
-	pub(super) fn load_for_order(&self, order: SortOrder) -> Result<(), AppError> {
+	pub(super) fn load_for_order(
+		&self,
+		order: SortOrder,
+		loaded_displays: &EntryLoadedDisplays,
+	) -> Result<(), AppError> {
 		match order.kind {
-			SortOrderKind::FileName => key::FileName::load(self),
-			SortOrderKind::ModificationDate => key::ModificationDate::load(self),
-			SortOrderKind::Size => key::Size::load(self),
-			SortOrderKind::ResolutionWidth => key::ResolutionWidth::load(self),
-			SortOrderKind::ResolutionHeight => key::ResolutionHeight::load(self),
-			SortOrderKind::Random => key::Random::load(self),
+			SortOrderKind::FileName => key::FileName::load(self, loaded_displays),
+			SortOrderKind::ModificationDate => key::ModificationDate::load(self, loaded_displays),
+			SortOrderKind::Size => key::Size::load(self, loaded_displays),
+			SortOrderKind::ResolutionWidth => key::ResolutionWidth::load(self, loaded_displays),
+			SortOrderKind::ResolutionHeight => key::ResolutionHeight::load(self, loaded_displays),
+			SortOrderKind::Random => key::Random::load(self, loaded_displays),
 		}
 	}
 }
@@ -283,10 +301,17 @@ impl EntryMetadata {
 #[derive(Clone, Debug)]
 pub enum EntryData {
 	/// Display-able data
-	Display(EntryDisplay),
+	Display(EntryDisplayKind),
 
 	/// Other
 	Other,
+}
+
+/// Entry display kind
+#[derive(Clone, Debug)]
+pub enum EntryDisplayKind {
+	Image { format: ImageFormat },
+	Video,
 }
 
 /// Entry Display
@@ -337,6 +362,7 @@ pub struct EntryResolution {
 	pub height: usize,
 }
 
+// TODO: De-duplicate this with `loaded_displays::load`.
 fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	let source = entry.source();
 	let file_name = entry.file_name().context("Entry had no file name")?;
@@ -359,13 +385,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
 		COMMON_VIDEO_FORMATS.contains(&ext)
 	{
-		// TODO: Support videos inside of other sources
-		let EntrySource::Path(path) = source else {
-			app_error::bail!("Videos are only supported by path")
-		};
-
-		let video = EntryVideo::new(path).context("Unable to create video")?;
-		return Ok(EntryData::Display(EntryDisplay::Video(video)));
+		return Ok(EntryData::Display(EntryDisplayKind::Video));
 	}
 
 	// If we got a format just from the path, return it
@@ -373,8 +393,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	if let Some(ext) = file_name.extension() &&
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
-		let image = EntryImage::new(source, format);
-		return Ok(EntryData::Display(EntryDisplay::Image(image)));
+		return Ok(EntryData::Display(EntryDisplayKind::Image { format }));
 	}
 
 	// If it's a directory it's non-media
@@ -411,8 +430,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 			.context("Unable to guess zip entry format")?,
 	};
 	if let Some(format) = format {
-		let image = EntryImage::new(source, format);
-		return Ok(EntryData::Display(EntryDisplay::Image(image)));
+		return Ok(EntryData::Display(EntryDisplayKind::Image { format }));
 	}
 
 	// Then finally, try to guess it with `ffmpeg`.
@@ -427,8 +445,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 		if let Ok(input) = ffmpeg_next::format::input(&path) &&
 			!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
 		{
-			let video = EntryVideo::new(path).context("Unable to create video")?;
-			return Ok(EntryData::Display(EntryDisplay::Video(video)));
+			return Ok(EntryData::Display(EntryDisplayKind::Video));
 		}
 	}
 

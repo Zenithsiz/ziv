@@ -18,7 +18,11 @@ pub use self::{
 
 // Imports
 use {
-	self::{entry::EntrySource, read_thread::ReadThread, sort_thread::SortThread},
+	self::{
+		entry::{EntryLoadedDisplays, EntrySource},
+		read_thread::ReadThread,
+		sort_thread::SortThread,
+	},
 	crate::util::AppError,
 	app_error::Context,
 	core::ops::{Bound, IntoBounds},
@@ -63,21 +67,22 @@ pub struct DirReader {
 
 impl DirReader {
 	/// Creates a new directory reader
-	pub fn new(path: PathBuf) -> Result<Self, AppError> {
+	pub fn new(path: PathBuf, loaded_displays: EntryLoadedDisplays) -> Result<Self, AppError> {
 		// TODO: This needs to be configurable.
 		let sort_order = SortOrder {
 			reverse: false,
 			kind:    SortOrderKind::FileName,
 		};
 		let inner = Arc::new(Mutex::new(Inner {
-			entries:            Entries::new(sort_order),
-			sort_progress:      None,
+			entries: Entries::new(sort_order),
+			loaded_displays,
+			sort_progress: None,
 			thumbnail_progress: ThumbnailProgress {
 				loading:    0,
 				generating: 0,
 			},
-			cur_entry:          None,
-			visitor:            None,
+			cur_entry: None,
+			visitor: None,
 		}));
 
 		#[cloned(inner)]
@@ -256,16 +261,13 @@ impl DirReader {
 	pub fn len(&self) -> usize {
 		self.inner.lock().entries.len()
 	}
-
-	/// Returns the index of an entry.
-	pub fn idx_of(&self, entry: &DirEntry) -> Result<usize, AppError> {
-		self.inner.lock().search(entry)
-	}
 }
 
 #[derive(derive_more::Debug)]
 struct Inner {
 	entries: Entries,
+
+	loaded_displays: EntryLoadedDisplays,
 
 	sort_progress:      Option<SortProgress>,
 	thumbnail_progress: ThumbnailProgress,
@@ -296,7 +298,10 @@ impl Inner {
 			if cur_entry.idx.is_some() {
 				break cur_entry;
 			}
-			match cur_entry.entry.is_loaded_for_order(self.entries.sort_order()) {
+			match cur_entry
+				.entry
+				.is_loaded_for_order(self.entries.sort_order(), &self.loaded_displays)
+			{
 				Ok(is_loaded) =>
 					if !is_loaded {
 						break cur_entry;
@@ -418,7 +423,10 @@ impl Inner {
 	//       bugs elsewhere that assume the item exists
 	pub fn search(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<usize, AppError> {
 		self.load(entry)?;
-		let idx = self.entries.search(entry).context("Entry wasn't loaded")?;
+		let idx = self
+			.entries
+			.search(entry, &self.loaded_displays)
+			.context("Entry wasn't loaded")?;
 
 		Ok(idx)
 	}
@@ -451,7 +459,14 @@ impl Inner {
 	/// Removes an entry
 	pub fn remove(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<bool, AppError> {
 		self.load(entry)?;
-		if self.entries.remove(entry).context("Unable to remove entry")?.is_none() {
+
+		let this = &mut **self;
+		if this
+			.entries
+			.remove(entry, &this.loaded_displays)
+			.context("Unable to remove entry")?
+			.is_none()
+		{
 			return Ok(false);
 		}
 
@@ -491,7 +506,11 @@ impl Inner {
 	/// Inserts an entry
 	pub fn insert(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<(), AppError> {
 		self.load(entry)?;
-		self.entries.insert(entry.clone()).context("Unable to insert entry")?;
+
+		let this = &mut **self;
+		this.entries
+			.insert(entry.clone(), &this.loaded_displays)
+			.context("Unable to insert entry")?;
 
 		// TODO: Update the index instead of discarding it?
 		if let Some(cur_entry) = &mut self.cur_entry {
@@ -507,9 +526,10 @@ impl Inner {
 
 	/// Loads an entry for the current sort order
 	pub fn load(self: &mut MutexGuard<'_, Self>, entry: &DirEntry) -> Result<(), AppError> {
+		let loaded_displays = self.loaded_displays.clone();
 		loop {
 			let sort_order = self.entries.sort_order();
-			MutexGuard::unlocked(self, || entry.load_for_order(sort_order))?;
+			MutexGuard::unlocked(self, || entry.load_for_order(sort_order, &loaded_displays))?;
 			if self.entries.sort_order() == sort_order {
 				break;
 			}
