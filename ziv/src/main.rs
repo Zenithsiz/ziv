@@ -429,7 +429,7 @@ impl EguiApp {
 
 		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) {
 			match data {
-				EntryData::Display(_) =>
+				EntryData::DisplayGuess(_) | EntryData::Unknown =>
 					if let Some(display) = self.try_with_entry(cur_entry, |this, cur_entry| {
 						this.loaded_displays.get_if_loaded(cur_entry)
 					}) {
@@ -457,7 +457,7 @@ impl EguiApp {
 							},
 						}
 					},
-				EntryData::Other => self.remove_entry(cur_entry),
+				EntryData::NonMedia => self.remove_entry(cur_entry),
 			}
 		}
 
@@ -954,7 +954,7 @@ impl EguiApp {
 			};
 
 			match data {
-				EntryData::Display(_) => {
+				EntryData::DisplayGuess(_) | EntryData::Unknown => {
 					let Some(display) = this.loaded_displays.get(entry, &this.thread_pool)? else {
 						return Ok(());
 					};
@@ -973,7 +973,7 @@ impl EguiApp {
 							},
 					}
 				},
-				EntryData::Other => this.remove_entry(entry),
+				EntryData::NonMedia => this.remove_entry(entry),
 			}
 		});
 	}
@@ -1013,7 +1013,7 @@ impl EguiApp {
 			self.preload_entry(ui, &entry);
 		}
 
-		let EntryData::Display(_) = data else {
+		let EntryData::DisplayGuess(_) = data else {
 			self.remove_entry(input.entry);
 			return output;
 		};
@@ -1617,7 +1617,8 @@ impl eframe::App for EguiApp {
 				// and remove it from the list if it's non-media.
 				Ok(Some(data)) => {
 					let entry = self.loading_entries.swap_remove(loading_entry_idx);
-					if matches!(data, EntryData::Other) {
+					// TODO: For unknown, should we try loading the display to check?
+					if matches!(data, EntryData::NonMedia) {
 						self.remove_entry(&entry);
 					}
 				},

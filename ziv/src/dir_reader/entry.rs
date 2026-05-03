@@ -28,14 +28,7 @@ use {
 	app_error::Context,
 	core::hash::Hash,
 	parking_lot::Mutex,
-	std::{
-		ffi::OsStr,
-		fs,
-		io::{self, Read},
-		path::PathBuf,
-		sync::Arc,
-		time::SystemTime,
-	},
+	std::{ffi::OsStr, fs, path::PathBuf, sync::Arc, time::SystemTime},
 	zutil_cloned::cloned,
 };
 
@@ -59,7 +52,7 @@ impl DirEntry {
 	/// Creates a new directory entry
 	pub(super) fn new(source: EntrySource, file_type: EntryFileType) -> Self {
 		let data = match file_type.is_dir() {
-			true => Loadable::loaded(EntryData::Other),
+			true => Loadable::loaded(EntryData::NonMedia),
 			false => Loadable::new(),
 		};
 
@@ -214,7 +207,7 @@ impl DirEntry {
 		};
 
 		let resolution = match data {
-			EntryData::Display(_) => {
+			EntryData::DisplayGuess(_) | EntryData::Unknown => {
 				let Some(display) = loaded_displays.get_if_loaded(self)? else {
 					return Ok(None);
 				};
@@ -223,8 +216,7 @@ impl DirEntry {
 					EntryDisplay::Video(video) => video.resolution_if_loaded()?,
 				}
 			},
-			// TODO: Is a resolution of 0 fine for these?
-			EntryData::Other => Some(EntryResolution { width: 0, height: 0 }),
+			EntryData::NonMedia => Some(EntryResolution { width: 0, height: 0 }),
 		};
 
 		Ok(resolution)
@@ -301,15 +293,18 @@ impl EntryMetadata {
 #[derive(Clone, Debug)]
 pub enum EntryData {
 	/// Display-able data
-	Display(EntryDisplayKind),
+	DisplayGuess(EntryDisplayGuess),
 
-	/// Other
-	Other,
+	/// Unknown
+	Unknown,
+
+	/// Non-media
+	NonMedia,
 }
 
-/// Entry display kind
+/// Entry display guess
 #[derive(Clone, Debug)]
-pub enum EntryDisplayKind {
+pub enum EntryDisplayGuess {
 	Image { format: ImageFormat },
 	Video,
 }
@@ -362,92 +357,37 @@ pub struct EntryResolution {
 	pub height: usize,
 }
 
-// TODO: De-duplicate this with `loaded_displays::load`.
+// TODO: Should we be trusting the extension in here?
 fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
-	let source = entry.source();
 	let file_name = entry.file_name().context("Entry had no file name")?;
 
 	// If it's a directory it's non-media
 	if entry.file_type().is_dir() {
-		return Ok(EntryData::Other);
+		return Ok(EntryData::NonMedia);
 	}
 
-	// Test against common zip archives
-	const COMMON_ZIP_FORMATS: &[&str] = &["zip", "cbz"];
-	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
-		COMMON_ZIP_FORMATS.contains(&ext)
-	{
-		return Ok(EntryData::Other);
+	// If it has no extension (or it's non-utf8), we consider it non-media
+	let Some(ext_str) = file_name.extension().and_then(OsStr::to_str) else {
+		return Ok(EntryData::NonMedia);
+	};
+
+	// Test against common non-media extensions
+	// TODO: This list needs to be much bigger
+	const COMMON_NON_MEDIA_FORMATS: &[&str] = &["zip", "cbz", "pdf", "xlsx", "7z", "jar", "gz", "txt", "csv", "rtf"];
+	if COMMON_NON_MEDIA_FORMATS.contains(&ext_str) {
+		return Ok(EntryData::NonMedia);
 	}
 
-	// Test against video file formats before we need to read the file.
+	// Test against video file formats
 	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
-	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
-		COMMON_VIDEO_FORMATS.contains(&ext)
-	{
-		return Ok(EntryData::Display(EntryDisplayKind::Video));
+	if COMMON_VIDEO_FORMATS.contains(&ext_str) {
+		return Ok(EntryData::DisplayGuess(EntryDisplayGuess::Video));
 	}
 
-	// If we got a format just from the path, return it
-	// TODO: Should we trust the extension?
-	if let Some(ext) = file_name.extension() &&
-		let Some(format) = ImageFormat::from_extension(ext)
-	{
-		return Ok(EntryData::Display(EntryDisplayKind::Image { format }));
+	// Finally just test against image formats
+	if let Some(format) = ImageFormat::from_extension(ext_str) {
+		return Ok(EntryData::DisplayGuess(EntryDisplayGuess::Image { format }));
 	}
 
-	// If it's a directory it's non-media
-	// Note: This check involves touching the filesystem, so we only
-	//       do it after checking everything we can without IO
-	let is_dir = match &source {
-		EntrySource::Path(path) => fs::metadata(path).context("Unable to get file metadata")?.is_dir(),
-		EntrySource::Zip(zip) => zip.is_dir().context("Unable to check if zip entry was a directory")?,
-	};
-	if is_dir {
-		return Ok(EntryData::Other);
-	}
-
-	// Otherwise, try to guess it by opening it with `image`
-	let format = match &source {
-		EntrySource::Path(path) => ::image::ImageReader::open(path)
-			.context("Unable to create image reader")?
-			.with_guessed_format()
-			.context("Unable to read file")?
-			.format(),
-
-		// TODO: `with_guessed_format` only uses the first 16 bytes, so we just read that
-		EntrySource::Zip(zip) => zip
-			.try_with_file(|mut file| {
-				let mut contents = [0; 16];
-				file.read_exact(&mut contents).context("Unable to read contents")?;
-				let format = ::image::ImageReader::new(io::Cursor::new(contents))
-					.with_guessed_format()
-					.context("Unable to read file")?
-					.format();
-
-				Ok(format)
-			})
-			.context("Unable to guess zip entry format")?,
-	};
-	if let Some(format) = format {
-		return Ok(EntryData::Display(EntryDisplayKind::Image { format }));
-	}
-
-	// Then finally, try to guess it with `ffmpeg`.
-	// Note: This detects quite a few thing we don't want to open,
-	//       such as text files, so we ignore part of the output.
-	// TODO: Currently we detect `svg`s as a video format (using
-	//       `svg_pipe`). However, `image` doesn't support `svg`s,
-	//       so for now we allow this.
-	// TODO: Support videos inside of other sources
-	if let EntrySource::Path(path) = source {
-		const DISALLOWED_VIDEO_FORMATS: &[&str] = &["lrc", "tty", "mjpeg"];
-		if let Ok(input) = ffmpeg_next::format::input(&path) &&
-			!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
-		{
-			return Ok(EntryData::Display(EntryDisplayKind::Video));
-		}
-	}
-
-	Ok(EntryData::Other)
+	Ok(EntryData::Unknown)
 }

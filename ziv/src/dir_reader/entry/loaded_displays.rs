@@ -4,13 +4,11 @@
 use {
 	super::{DirEntry, EntryDisplay},
 	crate::{
-		dir_reader::entry::{EntryImage, EntrySource, EntryVideo},
+		dir_reader::entry::{EntryData, EntryDisplayGuess, EntryImage, EntrySource, EntryVideo},
 		util::{AppError, LoadableLru, PriorityThreadPool, priority_thread_pool::Priority},
 	},
 	app_error::{Context, bail},
-	image::ImageFormat,
 	std::{
-		ffi::OsStr,
 		fs,
 		io::{self, Read},
 	},
@@ -60,42 +58,25 @@ impl EntryLoadedDisplays {
 
 fn load(entry: &DirEntry) -> Result<EntryDisplay, AppError> {
 	let source = entry.source();
-	let file_name = entry.file_name().context("Entry had no file name")?;
 
-	// If it's a directory it's non-media
-	if entry.file_type().is_dir() {
-		bail!("Directories have no display");
-	}
+	// First check if we already guessed a display
+	// TODO: Recover from the guess being wrong?
+	if let EntryData::DisplayGuess(guess) = entry.data_blocking()? {
+		match guess {
+			EntryDisplayGuess::Image { format } => {
+				let image = EntryImage::new(source, format);
+				return Ok(EntryDisplay::Image(image));
+			},
+			EntryDisplayGuess::Video => {
+				// TODO: Support videos inside of other sources
+				let EntrySource::Path(path) = source else {
+					app_error::bail!("Videos are only supported by path")
+				};
 
-	// Test against common zip archives
-	const COMMON_ZIP_FORMATS: &[&str] = &["zip", "cbz"];
-	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
-		COMMON_ZIP_FORMATS.contains(&ext)
-	{
-		bail!("Archives have no display");
-	}
-
-	// Test against video file formats before we need to read the file.
-	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
-	if let Some(ext) = file_name.extension().and_then(OsStr::to_str) &&
-		COMMON_VIDEO_FORMATS.contains(&ext)
-	{
-		// TODO: Support videos inside of other sources
-		let EntrySource::Path(path) = source else {
-			app_error::bail!("Videos are only supported by path")
-		};
-
-		let video = EntryVideo::new(path).context("Unable to create video")?;
-		return Ok(EntryDisplay::Video(video));
-	}
-
-	// If we got a format just from the path, return it
-	// TODO: Should we trust the extension?
-	if let Some(ext) = file_name.extension() &&
-		let Some(format) = ImageFormat::from_extension(ext)
-	{
-		let image = EntryImage::new(source, format);
-		return Ok(EntryDisplay::Image(image));
+				let video = EntryVideo::new(path).context("Unable to create video")?;
+				return Ok(EntryDisplay::Video(video));
+			},
+		}
 	}
 
 	// If it's a directory it's non-media

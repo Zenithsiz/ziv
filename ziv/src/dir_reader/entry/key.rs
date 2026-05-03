@@ -127,7 +127,7 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 		};
 
 		let is_loaded = match data {
-			EntryData::Display(_) => {
+			EntryData::DisplayGuess(_) | EntryData::Unknown => {
 				let Some(display) = loaded_displays.get_if_loaded(entry)? else {
 					return Ok(false);
 				};
@@ -137,7 +137,7 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 					EntryDisplay::Video(video) => video.resolution_is_loaded(),
 				}
 			},
-			EntryData::Other => true,
+			EntryData::NonMedia => true,
 		};
 
 		Ok(is_loaded)
@@ -146,11 +146,11 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 	fn load(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
 		let data = entry.data_blocking()?;
 		match data {
-			EntryData::Display(_) => match loaded_displays.get_blocking(entry)? {
+			EntryData::DisplayGuess(_) | EntryData::Unknown => match loaded_displays.get_blocking(entry)? {
 				EntryDisplay::Image(image) => _ = image.resolution_blocking()?,
 				EntryDisplay::Video(video) => _ = video.resolution_blocking()?,
 			},
-			EntryData::Other => (),
+			EntryData::NonMedia => (),
 		}
 
 		Ok(())

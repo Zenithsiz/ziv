@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{EntryData, EntryDisplayKind, EntryImage, EntrySource, video},
+	super::{EntryData, EntryDisplayGuess, EntryImage, EntrySource, video},
 	crate::{dir_reader::ThumbnailProgressGuard, util::AppError},
 	app_error::{Context, app_error},
 	core::time::Duration,
@@ -52,12 +52,12 @@ impl EntryThumbnail {
 			Ok(image) => (image, EntrySource::Path(thumbnail_path.into())),
 			Err(_) => {
 				thumbnail_progress.set_generating();
-				let EntryData::Display(display_kind) = data else {
+				let EntryData::DisplayGuess(display_kind) = data else {
 					return Ok(Self::NonMedia);
 				};
 
 				let (thumbnail, thumbnail_source) = match *display_kind {
-					EntryDisplayKind::Image { format } => {
+					EntryDisplayGuess::Image { format } => {
 						// If the image is thumbnail sized, just use it instead of generating a thumbnail
 						let image = super::image::open_with_format(source, format)?;
 						match image.width() <= 256 && image.height() <= 256 {
@@ -73,7 +73,7 @@ impl EntryThumbnail {
 						}
 					},
 					// Note: Despite `image` supporting GIFs, we create the thumbnail as a video
-					EntryDisplayKind::Video => match source {
+					EntryDisplayGuess::Video => match source {
 						EntrySource::Path(path) => {
 							tracing::debug!(?thumbnail_path, ?path, "Generating thumbnail from video");
 
