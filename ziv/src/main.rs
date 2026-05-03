@@ -945,6 +945,24 @@ impl EguiApp {
 		}
 	}
 
+	fn preload_entries(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) -> Result<(), AppError> {
+		// TODO: Not panic here
+		let preload_before = self
+			.dir_reader
+			.before_entry(entry, self.preload_prev)
+			.context("Unable to get previous preloads")?;
+		let preload_after = self
+			.dir_reader
+			.after_entry(entry, self.preload_next)
+			.context("Unable to get next preloads")?;
+
+		for entry in [preload_before, preload_after].into_iter().flatten() {
+			self.preload_entry(egui_ctx, &entry);
+		}
+
+		Ok(())
+	}
+
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
 		self.with_entry(entry, |this, entry| try {
 			match entry.data() {
@@ -985,19 +1003,8 @@ impl EguiApp {
 			self.vertical_pan_smooth = 0.0;
 		}
 
-		// Pre-load some entries
-		// TODO: Not panic here
-		let preload_before = self
-			.dir_reader
-			.before_entry(input.entry, self.preload_prev)
-			.expect("Entry should be valid");
-		let preload_after = self
-			.dir_reader
-			.after_entry(input.entry, self.preload_next)
-			.expect("Entry should be valid");
-
-		for entry in [preload_before, preload_after].into_iter().flatten() {
-			self.preload_entry(ui, &entry);
+		if let Err(err) = self.preload_entries(ui, input.entry) {
+			tracing::warn!("Unable to preload entries: {err:?}");
 		}
 
 		let EntryData::DisplayGuess(_) = input.entry.data() else {
