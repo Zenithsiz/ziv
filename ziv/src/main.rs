@@ -43,7 +43,14 @@ use {
 			DirReader,
 			SortOrder,
 			SortOrderKind,
-			entry::{EntryData, EntryLoadedThumbnails, EntrySource, EntryThumbnail, video::PlayingStatus},
+			entry::{
+				EntryData,
+				EntryDisplay,
+				EntryLoadedThumbnails,
+				EntrySource,
+				EntryThumbnail,
+				video::PlayingStatus,
+			},
 		},
 		dirs::Dirs,
 		shortcut::{ShortcutKey, Shortcuts, eguiInputStateExt},
@@ -381,7 +388,7 @@ impl EguiApp {
 		};
 		self.resized_image = false;
 
-		if let Some(EntryData::Video(video)) =
+		if let Some(EntryData::Display(EntryDisplay::Video(video))) =
 			self.try_with_entry(prev_entry, |_, prev_entry| prev_entry.data_if_loaded()) &&
 			video.set_offscreen()
 		{
@@ -434,8 +441,10 @@ impl EguiApp {
 				};
 
 				match data {
-					EntryData::Image(image) => image.unload(),
-					EntryData::Video(video) => video.stop(),
+					EntryData::Display(display) => match display {
+						EntryDisplay::Image(image) => image.unload(),
+						EntryDisplay::Video(video) => video.stop(),
+					},
 					EntryData::Other => (),
 				}
 
@@ -480,26 +489,28 @@ impl EguiApp {
 
 		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) {
 			match data {
-				EntryData::Image(image) => {
-					if let Some(resolution) =
-						self.try_with_entry(cur_entry, |this, _| image.resolution_load(&this.thread_pool))
-					{
-						write_str!(title, " {}x{}", resolution.width, resolution.height);
-					}
+				EntryData::Display(display) => match display {
+					EntryDisplay::Image(image) => {
+						if let Some(resolution) =
+							self.try_with_entry(cur_entry, |this, _| image.resolution_load(&this.thread_pool))
+						{
+							write_str!(title, " {}x{}", resolution.width, resolution.height);
+						}
 
-					let format = image.format();
-					write_str!(title, " ({format:?})");
-				},
-				EntryData::Video(video) => {
-					if let Some(resolution) =
-						self.try_with_entry(cur_entry, |this, _| video.resolution_load(&this.thread_pool))
-					{
-						write_str!(title, " {}x{}", resolution.width, resolution.height);
-					}
+						let format = image.format();
+						write_str!(title, " ({format:?})");
+					},
+					EntryDisplay::Video(video) => {
+						if let Some(resolution) =
+							self.try_with_entry(cur_entry, |this, _| video.resolution_load(&this.thread_pool))
+						{
+							write_str!(title, " {}x{}", resolution.width, resolution.height);
+						}
 
-					if let Some(duration) = video.duration() {
-						write_str!(title, " ({duration:.2?})");
-					}
+						if let Some(duration) = video.duration() {
+							write_str!(title, " ({duration:.2?})");
+						}
+					},
 				},
 				EntryData::Other => self.remove_entry(cur_entry),
 			}
@@ -1001,17 +1012,19 @@ impl EguiApp {
 			};
 
 			match data {
-				EntryData::Image(image) => image
-					.load(&this.thread_pool, egui_ctx)
-					.context("Unable to load image")?,
-				EntryData::Video(video) =>
-					if !video.started() {
-						// TODO: Pausing the video here means we aren't actually
-						//       preloading almost anything, just the thread initializing,
-						//       we should make it so a single frame gets rendered here.
-						video.pause();
-						video.start(egui_ctx.clone());
-					},
+				EntryData::Display(display) => match display {
+					EntryDisplay::Image(image) => image
+						.load(&this.thread_pool, egui_ctx)
+						.context("Unable to load image")?,
+					EntryDisplay::Video(video) =>
+						if !video.started() {
+							// TODO: Pausing the video here means we aren't actually
+							//       preloading almost anything, just the thread initializing,
+							//       we should make it so a single frame gets rendered here.
+							video.pause();
+							video.start(egui_ctx.clone());
+						},
+				},
 				EntryData::Other => this.remove_entry(entry),
 			}
 
@@ -1058,8 +1071,13 @@ impl EguiApp {
 			self.preload_entry(ui, &entry);
 		}
 
-		match data {
-			EntryData::Video(video) => {
+		let EntryData::Display(display) = data else {
+			self.remove_entry(input.entry);
+			return output;
+		};
+
+		match display {
+			EntryDisplay::Video(video) => {
 				if !video.started() {
 					video.start(ui.clone());
 				}
@@ -1113,7 +1131,7 @@ impl EguiApp {
 				}
 			},
 
-			EntryData::Image(image) => {
+			EntryDisplay::Image(image) => {
 				let Some(texture) = self.try_with_entry(input.entry, |this, _| {
 					image.load(&this.thread_pool, ui)?;
 					image.texture()
@@ -1156,8 +1174,6 @@ impl EguiApp {
 					self.update_texture_options(&texture);
 				}
 			},
-
-			EntryData::Other => self.remove_entry(input.entry),
 		}
 
 		output
@@ -1414,7 +1430,7 @@ impl EguiApp {
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
-			let Some(EntryData::Video(video)) =
+			let Some(EntryData::Display(EntryDisplay::Video(video))) =
 				self.try_with_entry(&cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) &&
 			video.set_offscreen()
 		{

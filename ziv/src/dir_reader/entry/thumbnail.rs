@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{EntryData, EntryImage, EntrySource, video},
+	super::{EntryData, EntryDisplay, EntryImage, EntrySource, video},
 	crate::{dir_reader::ThumbnailProgressGuard, util::AppError},
 	app_error::{Context, app_error},
 	core::time::Duration,
@@ -52,8 +52,12 @@ impl EntryThumbnail {
 			Ok(image) => (image, EntrySource::Path(thumbnail_path.into())),
 			Err(_) => {
 				thumbnail_progress.set_generating();
-				let (thumbnail, thumbnail_source) = match data {
-					EntryData::Image(image) => {
+				let EntryData::Display(display) = data else {
+					return Ok(Self::NonMedia);
+				};
+
+				let (thumbnail, thumbnail_source) = match display {
+					EntryDisplay::Image(image) => {
 						// If the image is thumbnail sized, just use it instead of generating a thumbnail
 						let image = super::image::open_with_format(source, image.format())?;
 						match image.width() <= 256 && image.height() <= 256 {
@@ -69,7 +73,7 @@ impl EntryThumbnail {
 						}
 					},
 					// Note: Despite `image` supporting GIFs, we create the thumbnail as a video
-					EntryData::Video(_) => match source {
+					EntryDisplay::Video(_) => match source {
 						EntrySource::Path(path) => {
 							tracing::debug!(?thumbnail_path, ?path, "Generating thumbnail from video");
 
@@ -79,7 +83,6 @@ impl EntryThumbnail {
 						EntrySource::Zip(_) =>
 							app_error::bail!("Thumbnails of videos inside of a zip file aren't supported yet"),
 					},
-					EntryData::Other => return Ok(Self::NonMedia),
 				};
 
 				// If we aren't using the image itself as a thumbnail, save it

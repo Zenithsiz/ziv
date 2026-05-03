@@ -209,8 +209,10 @@ impl DirEntry {
 		};
 
 		let resolution = match data {
-			EntryData::Image(image) => image.resolution_if_loaded()?,
-			EntryData::Video(video) => video.resolution_if_loaded()?,
+			EntryData::Display(display) => match display {
+				EntryDisplay::Image(image) => image.resolution_if_loaded()?,
+				EntryDisplay::Video(video) => video.resolution_if_loaded()?,
+			},
 			// TODO: Is a resolution of 0 fine for these?
 			EntryData::Other => Some(EntryResolution { width: 0, height: 0 }),
 		};
@@ -280,9 +282,18 @@ impl EntryMetadata {
 /// Entry data
 #[derive(Clone, Debug)]
 pub enum EntryData {
+	/// Display-able data
+	Display(EntryDisplay),
+
+	/// Other
+	Other,
+}
+
+/// Entry Display
+#[derive(Clone, Debug)]
+pub enum EntryDisplay {
 	Image(EntryImage),
 	Video(EntryVideo),
-	Other,
 }
 
 /// Entry file type
@@ -354,7 +365,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 		};
 
 		let video = EntryVideo::new(path).context("Unable to create video")?;
-		return Ok(EntryData::Video(video));
+		return Ok(EntryData::Display(EntryDisplay::Video(video)));
 	}
 
 	// If we got a format just from the path, return it
@@ -363,7 +374,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 		let Some(format) = ImageFormat::from_extension(ext)
 	{
 		let image = EntryImage::new(source, format);
-		return Ok(EntryData::Image(image));
+		return Ok(EntryData::Display(EntryDisplay::Image(image)));
 	}
 
 	// If it's a directory it's non-media
@@ -401,7 +412,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 	};
 	if let Some(format) = format {
 		let image = EntryImage::new(source, format);
-		return Ok(EntryData::Image(image));
+		return Ok(EntryData::Display(EntryDisplay::Image(image)));
 	}
 
 	// Then finally, try to guess it with `ffmpeg`.
@@ -417,7 +428,7 @@ fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
 			!DISALLOWED_VIDEO_FORMATS.contains(&input.format().name())
 		{
 			let video = EntryVideo::new(path).context("Unable to create video")?;
-			return Ok(EntryData::Video(video));
+			return Ok(EntryData::Display(EntryDisplay::Video(video)));
 		}
 	}
 

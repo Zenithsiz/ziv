@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{DirEntry, EntryData},
+	super::{DirEntry, EntryData, EntryDisplay},
 	crate::util::{AppError, PartialEqOrd},
 	app_error::Context,
 	std::{marker::ConstParamTy, path::PathBuf, random, time::SystemTime},
@@ -125,8 +125,10 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 		};
 
 		let is_loaded = match data {
-			EntryData::Image(image) => image.resolution_is_loaded(),
-			EntryData::Video(video) => video.resolution_is_loaded(),
+			EntryData::Display(display) => match display {
+				EntryDisplay::Image(image) => image.resolution_is_loaded(),
+				EntryDisplay::Video(video) => video.resolution_is_loaded(),
+			},
 			EntryData::Other => true,
 		};
 
@@ -136,8 +138,10 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 	fn load(entry: &DirEntry) -> Result<(), AppError> {
 		let data = entry.data_blocking()?;
 		match data {
-			EntryData::Image(image) => _ = image.resolution_blocking()?,
-			EntryData::Video(video) => _ = video.resolution_blocking()?,
+			EntryData::Display(display) => match display {
+				EntryDisplay::Image(image) => _ = image.resolution_blocking()?,
+				EntryDisplay::Video(video) => _ = video.resolution_blocking()?,
+			},
 			EntryData::Other => (),
 		}
 
