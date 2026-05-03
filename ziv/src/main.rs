@@ -20,7 +20,8 @@
 	never_type,
 	try_trait_v2_yeet,
 	random,
-	macro_derive
+	macro_derive,
+	min_adt_const_params
 )]
 
 // Modules

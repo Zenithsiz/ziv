@@ -5,7 +5,7 @@ use {
 	super::DirEntry,
 	crate::util::{AppError, PartialEqOrd},
 	app_error::Context,
-	std::{path::PathBuf, random, time::SystemTime},
+	std::{marker::ConstParamTy, path::PathBuf, random, time::SystemTime},
 };
 
 /// Sort key for a directory entry.
@@ -62,25 +62,29 @@ impl Key for Size {
 	}
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct ResolutionWidth(usize);
-
-impl Key for ResolutionWidth {
-	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
-		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
-
-		Ok(Self(resolution.width))
-	}
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(ConstParamTy)]
+pub enum ResolutionDir {
+	Width,
+	Height,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct ResolutionHeight(usize);
+pub type ResolutionWidth = Resolution<{ ResolutionDir::Width }>;
+pub type ResolutionHeight = Resolution<{ ResolutionDir::Height }>;
 
-impl Key for ResolutionHeight {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Resolution<const DIR: ResolutionDir>(usize);
+
+impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 	fn from_entry(entry: &DirEntry) -> Result<Self, AppError> {
 		let resolution = entry.resolution_if_loaded()?.context("Missing resolution")?;
 
-		Ok(Self(resolution.height))
+		let size = match DIR {
+			ResolutionDir::Width => resolution.width,
+			ResolutionDir::Height => resolution.height,
+		};
+
+		Ok(Self(size))
 	}
 }
 
