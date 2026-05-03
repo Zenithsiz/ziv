@@ -13,7 +13,11 @@ use {
 		priority_thread_pool::Priority,
 	},
 	app_error::Context,
-	core::{mem, time::Duration},
+	core::{
+		mem,
+		sync::atomic::{self, AtomicUsize},
+		time::Duration,
+	},
 	ffmpeg_next::Rescale,
 	parking_lot::{Condvar, Mutex},
 	std::{path::Path, sync::Arc, thread, time::Instant},
@@ -52,10 +56,19 @@ struct Inner {
 	resolution: Loadable<EntryResolution>,
 	state:      Mutex<State>,
 	condvar:    Condvar,
+
+	/// Number of [`EntryVideo`] instances.
+	// Note: We can't use `Arc::strong_count` to track this
+	//       since we'll need to notify the decoder thread
+	//       on drop, but it's possible for the thread to
+	//       wake up and go back to sleep before we drop the
+	//       `Arc` on our thread. Meanwhile with this, we can
+	//       ensure that we decrement it before notifying.
+	video_count: AtomicUsize,
 }
 
 /// Entry video
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct EntryVideo {
 	inner: Arc<Inner>,
 }
@@ -78,6 +91,7 @@ impl EntryVideo {
 				seek_to:        None,
 			}),
 			condvar: Condvar::new(),
+			video_count: AtomicUsize::new(1),
 		});
 
 		Ok(Self { inner })
@@ -266,6 +280,26 @@ impl EntryVideo {
 		drop(state);
 
 		self.inner.condvar.notify_one();
+	}
+}
+
+impl Clone for EntryVideo {
+	fn clone(&self) -> Self {
+		self.inner.video_count.fetch_add(1, atomic::Ordering::AcqRel);
+
+		Self {
+			inner: Arc::clone(&self.inner),
+		}
+	}
+}
+
+impl Drop for EntryVideo {
+	fn drop(&mut self) {
+		let prev_strong_count = self.inner.video_count.fetch_sub(1, atomic::Ordering::AcqRel);
+
+		if prev_strong_count == 1 {
+			self.inner.condvar.notify_all();
+		}
 	}
 }
 
@@ -512,7 +546,8 @@ impl DecoderThread {
 	/// Handles events, returning any user event
 	fn handle_events(&mut self) -> TryControlFlow<UserEvent, (), AppError> {
 		// Check if we should quit.
-		let should_quit = self.inner.state.lock().thread_status == DecoderThreadStatus::Stopping;
+		let should_quit = self.inner.video_count.load(atomic::Ordering::Acquire) == 0 ||
+			self.inner.state.lock().thread_status == DecoderThreadStatus::Stopping;
 		if should_quit {
 			return TryControlFlow::BreakOk(());
 		}
