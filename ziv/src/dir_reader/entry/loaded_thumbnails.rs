@@ -65,12 +65,12 @@ impl EntryLoadedThumbnails {
 			#[cloned(egui_ctx, thumbnails_dir)]
 			move |entry: &DirEntry| {
 				let source = entry.source();
-				let data = entry.data_blocking().context("Unable to load data")?;
+				let data = entry.data();
 
 				// TODO: Requesting a repaint inside of this closure is the wrong
 				//       thing to do, since it's possible for that repaint to happen
 				//       before the thumbnail gets added to the lru.
-				EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, &data, &mut thumbnail_progress)
+				EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, data, &mut thumbnail_progress)
 					.inspect(|_| egui_ctx.request_repaint())
 					.context("Unable to create thumbnail")
 			}

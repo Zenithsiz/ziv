@@ -427,38 +427,36 @@ impl EguiApp {
 			cur_entry.file_name().expect("Entry had no file name").display()
 		);
 
-		if let Some(data) = self.try_with_entry(cur_entry, |_, cur_entry| cur_entry.data_if_loaded()) {
-			match data {
-				EntryData::DisplayGuess(_) | EntryData::Unknown =>
-					if let Some(display) = self.try_with_entry(cur_entry, |this, cur_entry| {
-						this.loaded_displays.get_if_loaded(cur_entry)
-					}) {
-						match display {
-							EntryDisplay::Image(image) => {
-								if let Some(resolution) =
-									self.try_with_entry(cur_entry, |this, _| image.resolution_load(&this.thread_pool))
-								{
-									write_str!(title, " {}x{}", resolution.width, resolution.height);
-								}
+		match cur_entry.data() {
+			EntryData::DisplayGuess(_) | EntryData::Unknown =>
+				if let Some(display) = self.try_with_entry(cur_entry, |this, cur_entry| {
+					this.loaded_displays.get_if_loaded(cur_entry)
+				}) {
+					match display {
+						EntryDisplay::Image(image) => {
+							if let Some(resolution) =
+								self.try_with_entry(cur_entry, |this, _| image.resolution_load(&this.thread_pool))
+							{
+								write_str!(title, " {}x{}", resolution.width, resolution.height);
+							}
 
-								let format = image.format();
-								write_str!(title, " ({format:?})");
-							},
-							EntryDisplay::Video(video) => {
-								if let Some(resolution) =
-									self.try_with_entry(cur_entry, |this, _| video.resolution_load(&this.thread_pool))
-								{
-									write_str!(title, " {}x{}", resolution.width, resolution.height);
-								}
+							let format = image.format();
+							write_str!(title, " ({format:?})");
+						},
+						EntryDisplay::Video(video) => {
+							if let Some(resolution) =
+								self.try_with_entry(cur_entry, |this, _| video.resolution_load(&this.thread_pool))
+							{
+								write_str!(title, " {}x{}", resolution.width, resolution.height);
+							}
 
-								if let Some(duration) = video.duration() {
-									write_str!(title, " ({duration:.2?})");
-								}
-							},
-						}
-					},
-				EntryData::NonMedia => self.remove_entry(cur_entry),
-			}
+							if let Some(duration) = video.duration() {
+								write_str!(title, " ({duration:.2?})");
+							}
+						},
+					}
+				},
+			EntryData::NonMedia => self.remove_entry(cur_entry),
 		}
 
 		if let Some(size) = self.try_with_entry(cur_entry, |this, entry| entry.size_load(&this.thread_pool)) {
@@ -949,11 +947,7 @@ impl EguiApp {
 
 	fn preload_entry(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) {
 		self.with_entry(entry, |this, entry| try {
-			let Some(data) = entry.data_load(&this.thread_pool)? else {
-				return Ok(());
-			};
-
-			match data {
+			match entry.data() {
 				EntryData::DisplayGuess(_) | EntryData::Unknown => {
 					let Some(display) = this.loaded_displays.get(entry, &this.thread_pool)? else {
 						return Ok(());
@@ -991,13 +985,6 @@ impl EguiApp {
 			self.vertical_pan_smooth = 0.0;
 		}
 
-		let Some(data) = self.try_with_entry(input.entry, |this, entry| entry.data_load(&this.thread_pool)) else {
-			ui.centered_and_justified(|ui| {
-				ui.weak("Loading...");
-			});
-			return output;
-		};
-
 		// Pre-load some entries
 		// TODO: Not panic here
 		let preload_before = self
@@ -1013,7 +1000,7 @@ impl EguiApp {
 			self.preload_entry(ui, &entry);
 		}
 
-		let EntryData::DisplayGuess(_) = data else {
+		let EntryData::DisplayGuess(_) = input.entry.data() else {
 			self.remove_entry(input.entry);
 			return output;
 		};
@@ -1601,35 +1588,13 @@ impl EguiApp {
 
 impl eframe::App for EguiApp {
 	fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-		// Receive and try to load any new entries
-		// TODO: This should be configurable because it can do IO
-		// Note: To be more efficient, we use `swap_remove` when removing entries
-		//       here, which means we don't have a good way to iterate over all
-		//       entries aside from manually by indexing.
+		// Receive and check each new entry
 		self.loading_entries.extend(self.new_entry_rx.try_iter());
-		for loading_entry_idx in 0..self.loading_entries.len() {
-			let Some(entry) = self.loading_entries.get(loading_entry_idx) else {
-				break;
-			};
-
-			match entry.data_load(&self.thread_pool) {
-				// If we successfully loaded it, remove it from loading,
-				// and remove it from the list if it's non-media.
-				Ok(Some(data)) => {
-					let entry = self.loading_entries.swap_remove(loading_entry_idx);
-					// TODO: For unknown, should we try loading the display to check?
-					if matches!(data, EntryData::NonMedia) {
-						self.remove_entry(&entry);
-					}
-				},
-				// If unloaded, go next
-				Ok(None) => (),
-				// If it errored, remove it from both loading and the list.
-				Err(err) => {
-					tracing::warn!("Unable to load entry {:?}, removing: {err:?}", entry.source().name());
-					let entry = self.loading_entries.swap_remove(loading_entry_idx);
-					self.remove_entry(&entry);
-				},
+		while let Some(entry) = self.loading_entries.pop() {
+			// If it's non-media, remove it from our list.
+			// TODO: For unknown, should we try loading the display to check?
+			if *entry.data() == EntryData::NonMedia {
+				self.remove_entry(&entry);
 			}
 		}
 

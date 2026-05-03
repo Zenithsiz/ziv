@@ -61,8 +61,8 @@ fn load(entry: &DirEntry) -> Result<EntryDisplay, AppError> {
 
 	// First check if we already guessed a display
 	// TODO: Recover from the guess being wrong?
-	if let EntryData::DisplayGuess(guess) = entry.data_blocking()? {
-		match guess {
+	if let EntryData::DisplayGuess(guess) = entry.data() {
+		match *guess {
 			EntryDisplayGuess::Image { format } => {
 				let image = EntryImage::new(source, format);
 				return Ok(EntryDisplay::Image(image));

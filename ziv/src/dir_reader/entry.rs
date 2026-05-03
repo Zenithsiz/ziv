@@ -28,21 +28,26 @@ use {
 	app_error::Context,
 	core::hash::Hash,
 	parking_lot::Mutex,
-	std::{ffi::OsStr, fs, path::PathBuf, sync::Arc, time::SystemTime},
+	std::{
+		ffi::OsStr,
+		fs,
+		path::{Path, PathBuf},
+		sync::Arc,
+		time::SystemTime,
+	},
 	zutil_cloned::cloned,
 };
 
 #[derive(Debug)]
 struct Inner {
-	source:    Mutex<EntrySource>,
-	file_type: EntryFileType,
+	source: Mutex<EntrySource>,
 
 	// TODO: Should we keep these here?
 	//       Storing these means that when changing sort order
 	//       we don't need to re-read the files, but it also means
 	//       storing more data that might be unnecessary.
 	metadata: Loadable<EntryMetadata>,
-	data:     Loadable<EntryData>,
+	data:     EntryData,
 }
 
 #[derive(Clone, Debug)]
@@ -51,14 +56,10 @@ pub struct DirEntry(Arc<Inner>);
 impl DirEntry {
 	/// Creates a new directory entry
 	pub(super) fn new(source: EntrySource, file_type: EntryFileType) -> Self {
-		let data = match file_type.is_dir() {
-			true => Loadable::loaded(EntryData::NonMedia),
-			false => Loadable::new(),
-		};
+		let data = EntryData::guess(&source, file_type);
 
 		Self(Arc::new(Inner {
 			source: Mutex::new(source),
-			file_type,
 			metadata: Loadable::new(),
 			data,
 		}))
@@ -88,14 +89,6 @@ impl DirEntry {
 			EntrySource::Path(path) => path.file_name().context("Missing file name").map(PathBuf::from),
 			EntrySource::Zip(zip) => Ok(zip.file_name().to_owned()),
 		}
-	}
-}
-
-/// File type
-impl DirEntry {
-	/// Returns this entry's file type
-	pub fn file_type(&self) -> EntryFileType {
-		self.0.file_type
 	}
 }
 
@@ -129,24 +122,9 @@ impl DirEntry {
 
 /// Data
 impl DirEntry {
-	/// Gets the entry's data, blocking
-	fn data_blocking(&self) -> Result<EntryData, AppError> {
-		self.0
-			.data
-			.load(|| self::load_entry_data(self).context("Unable to load entry data"))
-	}
-
-	/// Gets the entry's data, loading it
-	pub fn data_load(&self, thread_pool: &PriorityThreadPool) -> Result<Option<EntryData>, AppError> {
-		#[cloned(this = self)]
-		self.0.data.try_load(thread_pool, Priority::HIGH, move || {
-			self::load_entry_data(&this).context("Unable to load entry data")
-		})
-	}
-
-	/// Gets the entry's data, if loaded
-	pub fn data_if_loaded(&self) -> Result<Option<EntryData>, AppError> {
-		self.0.data.try_get()
+	/// Gets the entry's data
+	pub fn data(&self) -> &EntryData {
+		&self.0.data
 	}
 }
 
@@ -202,11 +180,7 @@ impl DirEntry {
 		&self,
 		loaded_displays: &EntryLoadedDisplays,
 	) -> Result<Option<EntryResolution>, AppError> {
-		let Some(data) = self.data_if_loaded()? else {
-			return Ok(None);
-		};
-
-		let resolution = match data {
+		let resolution = match self.data() {
 			EntryData::DisplayGuess(_) | EntryData::Unknown => {
 				let Some(display) = loaded_displays.get_if_loaded(self)? else {
 					return Ok(None);
@@ -290,7 +264,7 @@ impl EntryMetadata {
 }
 
 /// Entry data
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum EntryData {
 	/// Display-able data
 	DisplayGuess(EntryDisplayGuess),
@@ -302,8 +276,54 @@ pub enum EntryData {
 	NonMedia,
 }
 
+impl EntryData {
+	/// Guesses entry data from an entry
+	// TODO: Should we be trusting the extension in here?
+	fn guess(source: &EntrySource, file_type: EntryFileType) -> Self {
+		let file_name = match source {
+			EntrySource::Path(path) => match path.file_name() {
+				Some(file_name) => Path::new(file_name),
+				// If it has no file name, it's definitely non-media
+				None => return Self::NonMedia,
+			},
+			EntrySource::Zip(zip) => zip.file_name(),
+		};
+
+		// If it's a directory it's non-media
+		if file_type.is_dir() {
+			return Self::NonMedia;
+		}
+
+		// If it has no extension (or it's non-utf8), we consider it non-media
+		let Some(ext_str) = file_name.extension().and_then(OsStr::to_str) else {
+			return Self::NonMedia;
+		};
+
+		// Test against common non-media extensions
+		// TODO: This list needs to be much bigger
+		const COMMON_NON_MEDIA_FORMATS: &[&str] =
+			&["zip", "cbz", "pdf", "xlsx", "7z", "jar", "gz", "txt", "csv", "rtf"];
+		if COMMON_NON_MEDIA_FORMATS.contains(&ext_str) {
+			return Self::NonMedia;
+		}
+
+		// Test against video file formats
+		const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
+		if COMMON_VIDEO_FORMATS.contains(&ext_str) {
+			return Self::DisplayGuess(EntryDisplayGuess::Video);
+		}
+
+		// Finally just test against image formats
+		if let Some(format) = ImageFormat::from_extension(ext_str) {
+			return Self::DisplayGuess(EntryDisplayGuess::Image { format });
+		}
+
+		Self::Unknown
+	}
+}
+
 /// Entry display guess
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum EntryDisplayGuess {
 	Image { format: ImageFormat },
 	Video,
@@ -355,39 +375,4 @@ pub struct EntryResolution {
 	// TODO: These should probably be `u32`s.
 	pub width:  usize,
 	pub height: usize,
-}
-
-// TODO: Should we be trusting the extension in here?
-fn load_entry_data(entry: &DirEntry) -> Result<EntryData, AppError> {
-	let file_name = entry.file_name().context("Entry had no file name")?;
-
-	// If it's a directory it's non-media
-	if entry.file_type().is_dir() {
-		return Ok(EntryData::NonMedia);
-	}
-
-	// If it has no extension (or it's non-utf8), we consider it non-media
-	let Some(ext_str) = file_name.extension().and_then(OsStr::to_str) else {
-		return Ok(EntryData::NonMedia);
-	};
-
-	// Test against common non-media extensions
-	// TODO: This list needs to be much bigger
-	const COMMON_NON_MEDIA_FORMATS: &[&str] = &["zip", "cbz", "pdf", "xlsx", "7z", "jar", "gz", "txt", "csv", "rtf"];
-	if COMMON_NON_MEDIA_FORMATS.contains(&ext_str) {
-		return Ok(EntryData::NonMedia);
-	}
-
-	// Test against video file formats
-	const COMMON_VIDEO_FORMATS: &[&str] = &["gif", "mkv", "mp4", "mov", "avi", "webm"];
-	if COMMON_VIDEO_FORMATS.contains(&ext_str) {
-		return Ok(EntryData::DisplayGuess(EntryDisplayGuess::Video));
-	}
-
-	// Finally just test against image formats
-	if let Some(format) = ImageFormat::from_extension(ext_str) {
-		return Ok(EntryData::DisplayGuess(EntryDisplayGuess::Image { format }));
-	}
-
-	Ok(EntryData::Unknown)
 }

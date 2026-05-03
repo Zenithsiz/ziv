@@ -122,11 +122,7 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 	}
 
 	fn is_loaded(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<bool, AppError> {
-		let Some(data) = entry.0.data.try_get()? else {
-			return Ok(false);
-		};
-
-		let is_loaded = match data {
+		let is_loaded = match entry.0.data {
 			EntryData::DisplayGuess(_) | EntryData::Unknown => {
 				let Some(display) = loaded_displays.get_if_loaded(entry)? else {
 					return Ok(false);
@@ -144,8 +140,7 @@ impl<const DIR: ResolutionDir> Key for Resolution<DIR> {
 	}
 
 	fn load(entry: &DirEntry, loaded_displays: &EntryLoadedDisplays) -> Result<(), AppError> {
-		let data = entry.data_blocking()?;
-		match data {
+		match entry.0.data {
 			EntryData::DisplayGuess(_) | EntryData::Unknown => match loaded_displays.get_blocking(entry)? {
 				EntryDisplay::Image(image) => _ = image.resolution_blocking()?,
 				EntryDisplay::Video(video) => _ = video.resolution_blocking()?,
