@@ -41,7 +41,7 @@ impl SmartTextureHandle {
 		}
 
 		let handle = egui_ctx.load_image(name, image);
-		Self::Simple(EguiTextureHandle(handle))
+		Self::Simple(handle)
 	}
 
 	/// Creates the image's texture by splitting the image
@@ -75,7 +75,7 @@ impl SmartTextureHandle {
 				//       when our width is 1.
 				let tile_image = image.crop(x, y, width, height);
 				let handle = egui_ctx.load_image(format!("{name}@{x}+{y}"), tile_image);
-				tiles.push(EguiTextureHandle(handle));
+				tiles.push(handle);
 			}
 		}
 

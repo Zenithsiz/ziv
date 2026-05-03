@@ -248,7 +248,7 @@ impl From<&'_ EguiTextureHandle> for egui::load::SizedTexture {
 
 #[extend::ext(name = EguiCtxLoadImage)]
 pub impl egui::Context {
-	fn load_image(&self, name: impl Into<String>, image: DynamicImage) -> egui::TextureHandle {
+	fn load_image(&self, name: impl Into<String>, image: DynamicImage) -> EguiTextureHandle {
 		let image = egui::ColorImage::from_rgba_unmultiplied(
 			[image.width() as usize, image.height() as usize],
 			&image.into_rgba8().into_flat_samples().samples,
@@ -257,7 +257,7 @@ pub impl egui::Context {
 
 		// TODO: This filter should be customizable.
 		let options = egui::TextureOptions::LINEAR;
-		self.load_texture(name, image, options)
+		EguiTextureHandle(self.load_texture(name, image, options))
 	}
 }
 
