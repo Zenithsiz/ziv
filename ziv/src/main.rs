@@ -186,6 +186,7 @@ struct EguiApp {
 	entries_per_row:          usize,
 	entries_per_row_changed:  bool,
 	scripts:                  Arc<[PathBuf]>,
+	// TODO: These need to be reaped
 	running_scripts:          Vec<process::Child>,
 	vertical_pan_smooth:      f32,
 	settings_is_open:         bool,
