@@ -1454,12 +1454,8 @@ impl EguiApp {
 
 								let frame_res = cell_frame.show(ui, |ui| {
 									ui.vertical(|ui| {
-										enum Thumbnail {
-											Image(SmartTextureHandle),
-											NonMedia,
-										}
 										let thumbnail = self.try_with_entry(&entry, |this, entry| try {
-											let Some(thumbnail) = this.loaded_thumbnails.get(
+											let thumbnail = this.loaded_thumbnails.get(
 												entry,
 												&this.dir_reader,
 												&this.thread_pool,
@@ -1468,23 +1464,22 @@ impl EguiApp {
 													.thumbnails_cache
 													.as_ref()
 													.unwrap_or_else(|| this.dirs.thumbnails()),
-											)?
-											else {
-												ui.vertical_centered(|ui| {
-													ui.weak("Loading...");
-												});
-												return Ok(None);
-											};
+											)?;
 
 											match thumbnail {
-												EntryThumbnail::Image(image) => image.texture()?.map(Thumbnail::Image),
-												EntryThumbnail::NonMedia => Some(Thumbnail::NonMedia),
+												Some(thumbnail) => Some(thumbnail),
+												None => {
+													ui.vertical_centered(|ui| {
+														ui.weak("Loading...");
+													});
+													None
+												},
 											}
 										});
 
 										match thumbnail {
 											// TODO: Not have to manually paint the texture?
-											Some(Thumbnail::Image(texture)) => {
+											Some(EntryThumbnail::Image(texture)) => {
 												let texture_size = texture.size_vec2();
 
 												let image_as = image_size.y / image_size.x;
@@ -1509,9 +1504,9 @@ impl EguiApp {
 
 												let ui_rect = egui::Rect::from_center_size(ui_center_pos, ui_size);
 
-												texture.paint_at(ui, uv_rect, ui_rect);
+												egui::Image::new(&texture).uv(uv_rect).paint_at(ui, ui_rect);
 											},
-											Some(Thumbnail::NonMedia) => self.remove_entry(&entry),
+											Some(EntryThumbnail::NonMedia) => self.remove_entry(&entry),
 											None => (),
 										}
 

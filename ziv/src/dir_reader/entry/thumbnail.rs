@@ -2,12 +2,15 @@
 
 // Imports
 use {
-	super::{EntryData, EntryDisplayGuess, EntryImage, EntrySource, video},
-	crate::{dir_reader::ThumbnailProgressGuard, util::AppError},
+	super::{EntryData, EntryDisplayGuess, EntrySource, video},
+	crate::{
+		dir_reader::ThumbnailProgressGuard,
+		util::{AppError, EguiCtxLoadImage, EguiTextureHandle},
+	},
 	app_error::{Context, app_error},
 	core::time::Duration,
 	ffmpeg_next::Rescale,
-	image::{DynamicImage, ImageFormat},
+	image::DynamicImage,
 	std::path::Path,
 	url::Url,
 };
@@ -15,7 +18,7 @@ use {
 /// Entry thumbnail
 #[derive(Clone, Debug)]
 pub enum EntryThumbnail {
-	Image(EntryImage),
+	Image(EguiTextureHandle),
 	NonMedia,
 }
 
@@ -103,8 +106,8 @@ impl EntryThumbnail {
 			},
 		};
 
-		let image = EntryImage::loaded(thumbnail_source, ImageFormat::Png, egui_ctx, thumbnail);
-		Ok(Self::Image(image))
+		let texture = egui_ctx.load_image(thumbnail_source.name(), thumbnail);
+		Ok(Self::Image(texture))
 	}
 }
 

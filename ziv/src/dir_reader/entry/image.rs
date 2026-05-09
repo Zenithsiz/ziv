@@ -37,22 +37,6 @@ impl EntryImage {
 		}
 	}
 
-	/// Creates a loaded entry image
-	pub fn loaded(source: EntrySource, format: ImageFormat, egui_ctx: &egui::Context, image: DynamicImage) -> Self {
-		let texture = SmartTextureHandle::new(source.name(), image, egui_ctx);
-
-		let [width, height] = texture.size();
-		let resolution = EntryResolution { width, height };
-		Self {
-			inner: Arc::new(Inner {
-				source,
-				texture: Loadable::loaded(texture),
-				resolution: Loadable::loaded(resolution),
-				format,
-			}),
-		}
-	}
-
 	/// Starts loading this image, if unloaded
 	pub fn load(&self, thread_pool: &PriorityThreadPool, egui_ctx: &egui::Context) -> Result<(), AppError> {
 		#[cloned(source = self.inner.source, format = self.inner.format, egui_ctx;)]

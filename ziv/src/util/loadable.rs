@@ -29,16 +29,6 @@ impl<T, E> Loadable<T, E> {
 		}
 	}
 
-	/// Creates a new, loaded, loadable
-	pub const fn loaded(value: T) -> Self {
-		Self {
-			inner: Mutex::new(Inner {
-				value:   Some(Ok(value)),
-				task_rx: None,
-			}),
-		}
-	}
-
 	/// Returns if this loadable has a value.
 	///
 	/// Does not check if the loading task exists or is done.
