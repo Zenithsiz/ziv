@@ -167,20 +167,13 @@ impl DisplayMode {
 	}
 }
 
-#[derive(Debug)]
-struct Controls {
-	zoom_sensitivity:         f32,
-	scroll_sensitivity:       f32,
-	keyboard_pan_sensitivity: f32,
-	keyboard_pan_smooth:      f32,
-}
-
 // TODO: This is a big mess, we need to organize it better
 //       and rename things to not be as confusing.
 #[derive(derive_more::Debug)]
 #[expect(clippy::struct_excessive_bools, reason = "TODO")]
 struct EguiApp {
 	config_path:              PathBuf,
+	config:                   Config,
 	dirs:                     Arc<Dirs>,
 	thread_pool:              PriorityThreadPool,
 	dir_reader:               DirReader,
@@ -190,13 +183,10 @@ struct EguiApp {
 	view_mode:                ViewMode,
 	display_mode:             DisplayMode,
 	display_mode_switched:    bool,
-	shortcuts:                Shortcuts,
 	entries_per_row:          usize,
 	entries_per_row_changed:  bool,
-	scripts_dir:              Option<Arc<Path>>,
 	scripts:                  Arc<[PathBuf]>,
 	running_scripts:          Vec<process::Child>,
-	controls:                 Controls,
 	vertical_pan_smooth:      f32,
 	settings_is_open:         bool,
 	settings_tab:             SettingsTab,
@@ -206,17 +196,12 @@ struct EguiApp {
 	cur_frame_size:  Option<egui::Vec2>,
 	last_frame_size: Option<egui::Vec2>,
 
-	preload_prev: usize,
-	preload_next: usize,
-
 	new_entry_rx:    mpsc::Receiver<DirEntry>,
 	loading_entries: Vec<DirEntry>,
 
 	texture_options:  egui::TextureOptions,
 	#[debug(ignore)]
 	empty_image_data: egui::ImageData,
-
-	thumbnails_dir: Option<Arc<Path>>,
 
 	loaded_thumbnails: EntryLoadedThumbnails,
 	loaded_displays:   EntryLoadedDisplays,
@@ -243,16 +228,14 @@ impl EguiApp {
 		});
 
 		// Setup the thumbnails
-		let thumbnails_dir = config.thumbnails_cache.map(Arc::from);
-		fs::create_dir_all(thumbnails_dir.as_ref().unwrap_or_else(|| dirs.thumbnails()))
-			.context("Unable to create thumbnails directory")?;
+		let thumbnails_dir = config.thumbnails_cache.as_ref().unwrap_or_else(|| dirs.thumbnails());
+		fs::create_dir_all(thumbnails_dir).context("Unable to create thumbnails directory")?;
 		let loaded_thumbnails = EntryLoadedThumbnails::new();
 
 		// Get the scripts
-		let scripts_dir = config.scripts_dir.map(Arc::from);
-		fs::create_dir_all(scripts_dir.as_ref().unwrap_or_else(|| dirs.scripts()))
-			.context("Unable to create scripts directory")?;
-		let scripts = fs::read_dir(scripts_dir.as_ref().unwrap_or_else(|| dirs.scripts()))
+		let scripts_dir = config.scripts_dir.as_ref().unwrap_or_else(|| dirs.scripts());
+		fs::create_dir_all(scripts_dir).context("Unable to create scripts directory")?;
+		let scripts = fs::read_dir(scripts_dir)
 			.context("Unable to read scripts directory")?
 			.map(|entry| {
 				let entry = entry.context("Unable to read directory entry")?;
@@ -269,6 +252,7 @@ impl EguiApp {
 
 		Ok(Self {
 			config_path,
+			config,
 			dirs,
 			thread_pool,
 			dir_reader,
@@ -281,19 +265,9 @@ impl EguiApp {
 			view_mode: ViewMode::FitWindow,
 			display_mode: DisplayMode::Image,
 			display_mode_switched: false,
-			scripts_dir,
 			scripts,
 			running_scripts: vec![],
-			shortcuts: config.shortcuts,
-			controls: Controls {
-				zoom_sensitivity:         config.controls.zoom_sensitivity,
-				scroll_sensitivity:       config.controls.scroll_sensitivity,
-				keyboard_pan_sensitivity: config.controls.keyboard_pan_sensitivity,
-				keyboard_pan_smooth:      config.controls.keyboard_pan_smooth,
-			},
 			vertical_pan_smooth: 0.0,
-			preload_prev: config.preload[0],
-			preload_next: config.preload[1],
 			settings_is_open: false,
 			settings_tab: SettingsTab::General,
 			settings_waiting_for_key: None,
@@ -306,28 +280,9 @@ impl EguiApp {
 			loading_entries: vec![],
 			texture_options: egui::TextureOptions::LINEAR,
 			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
-			thumbnails_dir,
 			loaded_thumbnails,
 			loaded_displays,
 		})
-	}
-
-	/// Saves the configuration
-	fn save_config(&self) -> Result<(), AppError> {
-		let config = Config {
-			thumbnails_cache: self.thumbnails_dir.as_ref().map(|dir| dir.to_path_buf()),
-			scripts_dir:      self.scripts_dir.as_deref().map(PathBuf::from),
-			preload:          [self.preload_prev, self.preload_next],
-			shortcuts:        self.shortcuts.clone(),
-			controls:         config::Controls {
-				zoom_sensitivity:         self.controls.zoom_sensitivity,
-				scroll_sensitivity:       self.controls.scroll_sensitivity,
-				keyboard_pan_sensitivity: self.controls.keyboard_pan_sensitivity,
-				keyboard_pan_smooth:      self.controls.keyboard_pan_smooth,
-			},
-		};
-
-		util::config::save(&config, &self.config_path)
 	}
 
 	fn remove_entry(&self, entry: &DirEntry) {
@@ -551,9 +506,8 @@ impl EguiApp {
 				match self.settings_tab {
 					SettingsTab::General => {
 						ui.collapsing("Preload", |ui| {
-							for (name, preload) in
-								[("Previous", &mut self.preload_prev), ("Next", &mut self.preload_next)]
-							{
+							let [prev, next] = &mut self.config.preload;
+							for (name, preload) in [("Previous", prev), ("Next", next)] {
 								egui::Slider::new(preload, 0..=16)
 									.text(name)
 									.clamping(egui::SliderClamping::Never)
@@ -562,15 +516,16 @@ impl EguiApp {
 						});
 
 						ui.collapsing("Controls", |ui| {
+							let controls = &mut self.config.controls;
 							for (name, preload, range) in [
-								("Zoom sensitivity", &mut self.controls.zoom_sensitivity, 100.0..=300.0),
-								("Scroll sensitivity", &mut self.controls.scroll_sensitivity, 1.0..=3.0),
+								("Zoom sensitivity", &mut controls.zoom_sensitivity, 100.0..=300.0),
+								("Scroll sensitivity", &mut controls.scroll_sensitivity, 1.0..=3.0),
 								(
 									"Keyboard pan sensitivity",
-									&mut self.controls.keyboard_pan_sensitivity,
+									&mut controls.keyboard_pan_sensitivity,
 									0.0..=1.0,
 								),
-								("Keyboard pan smooth", &mut self.controls.keyboard_pan_smooth, 0.0..=1.0),
+								("Keyboard pan smooth", &mut controls.keyboard_pan_smooth, 0.0..=1.0),
 							] {
 								egui::Slider::new(preload, range)
 									.text(name)
@@ -587,7 +542,7 @@ impl EguiApp {
 										continue;
 									};
 
-									let shortcut_key = shortcut_ident.get(&mut self.shortcuts);
+									let shortcut_key = shortcut_ident.get(&mut self.config.shortcuts);
 									shortcut_key.key = key;
 									shortcut_key.modifiers = modifiers;
 									self.settings_waiting_for_key = None;
@@ -598,7 +553,7 @@ impl EguiApp {
 
 						// TODO: Organize these better?
 						for shortcut_ident in ShortcutKeyIdent::variants() {
-							let shortcut_key: &mut ShortcutKey = shortcut_ident.get(&mut self.shortcuts);
+							let shortcut_key: &mut ShortcutKey = shortcut_ident.get(&mut self.config.shortcuts);
 
 							ui.horizontal(|ui| {
 								ui.label(shortcut_ident.to_string());
@@ -638,8 +593,10 @@ impl EguiApp {
 
 				ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
 					if ui.button("Save").clicked() &&
-						let Err(err) = self.save_config()
-					{
+						let Err(err) = {
+							let this = &self;
+							util::config::save(&this.config, &this.config_path)
+						} {
 						tracing::error!("Unable to save configuration file: {err:?}");
 					}
 					ui.separator();
@@ -665,7 +622,7 @@ impl EguiApp {
 		view_mode: ViewMode,
 		window_response: &egui::Response,
 		vertical_pan: f32,
-		controls: &Controls,
+		controls: &config::Controls,
 		texture_options: &mut egui::TextureOptions,
 	) -> egui::Response {
 		let window_size = ui.available_size().round_ui();
@@ -950,13 +907,14 @@ impl EguiApp {
 
 	fn preload_entries(&mut self, egui_ctx: &egui::Context, entry: &DirEntry) -> Result<(), AppError> {
 		// TODO: Not panic here
+		let [prev, next] = self.config.preload;
 		let preload_before = self
 			.dir_reader
-			.before_entry(entry, self.preload_prev)
+			.before_entry(entry, prev)
 			.context("Unable to get previous preloads")?;
 		let preload_after = self
 			.dir_reader
-			.after_entry(entry, self.preload_next)
+			.after_entry(entry, next)
 			.context("Unable to get next preloads")?;
 
 		for entry in [preload_before, preload_after].into_iter().flatten() {
@@ -1000,7 +958,7 @@ impl EguiApp {
 			resize_size:    None,
 		};
 
-		let vertical_pan = self.vertical_pan_smooth * self.controls.keyboard_pan_smooth;
+		let vertical_pan = self.vertical_pan_smooth * self.config.controls.keyboard_pan_smooth;
 		self.vertical_pan_smooth -= vertical_pan;
 		if self.vertical_pan_smooth.abs() < 1e-5 {
 			self.vertical_pan_smooth = 0.0;
@@ -1068,7 +1026,7 @@ impl EguiApp {
 					self.view_mode,
 					input.window_response,
 					vertical_pan,
-					&self.controls,
+					&self.config.controls,
 					&mut self.texture_options,
 				));
 				self.draw_video_controls(ui, input, &video);
@@ -1113,7 +1071,7 @@ impl EguiApp {
 					self.view_mode,
 					input.window_response,
 					vertical_pan,
-					&self.controls,
+					&self.config.controls,
 					&mut self.texture_options,
 				));
 
@@ -1190,13 +1148,13 @@ impl EguiApp {
 		ui.input_mut(|input| {
 			fullscreen = input.pointer.button_double_clicked(egui::PointerButton::Primary);
 
-			move_prev = input.consume_shortcut_key(self.shortcuts.prev);
-			move_next = input.consume_shortcut_key(self.shortcuts.next);
+			move_prev = input.consume_shortcut_key(self.config.shortcuts.prev);
+			move_next = input.consume_shortcut_key(self.config.shortcuts.next);
 
-			move_first = input.consume_shortcut_key(self.shortcuts.first);
-			move_last = input.consume_shortcut_key(self.shortcuts.last);
+			move_first = input.consume_shortcut_key(self.config.shortcuts.first);
+			move_last = input.consume_shortcut_key(self.config.shortcuts.last);
 
-			toggle_pause |= input.consume_shortcut_key(self.shortcuts.toggle_pause);
+			toggle_pause |= input.consume_shortcut_key(self.config.shortcuts.toggle_pause);
 			toggle_pause |= input.pointer.button_clicked(egui::PointerButton::Primary);
 
 			// Note: The order is important here, because by default `pan_up` and `fit_width_if_default`
@@ -1205,19 +1163,19 @@ impl EguiApp {
 			let is_default_view_mode = self.view_mode == ViewMode::FitWindow &&
 				self.pan_zoom.offset == egui::Vec2::ZERO &&
 				self.pan_zoom.zoom == 0.0;
-			if is_default_view_mode && input.consume_shortcut_key(self.shortcuts.fit_width_if_default) {
+			if is_default_view_mode && input.consume_shortcut_key(self.config.shortcuts.fit_width_if_default) {
 				self.view_mode = ViewMode::FitWidth;
 			}
 
-			if input.consume_shortcut_key(self.shortcuts.pan_up) {
+			if input.consume_shortcut_key(self.config.shortcuts.pan_up) {
 				self.vertical_pan_smooth += 1.0;
 			}
-			if input.consume_shortcut_key(self.shortcuts.pan_down) {
+			if input.consume_shortcut_key(self.config.shortcuts.pan_down) {
 				self.vertical_pan_smooth -= 1.0;
 			}
 
 
-			for (&view_mode, &key) in &self.shortcuts.view_modes {
+			for (&view_mode, &key) in &self.config.shortcuts.view_modes {
 				if input.consume_shortcut_key(key) {
 					self.view_mode = view_mode;
 					self.pan_zoom = PanZoom {
@@ -1370,8 +1328,8 @@ impl EguiApp {
 		let mut scroll_up = false;
 		let mut scroll_down = false;
 		ui.input_mut(|input| {
-			scroll_up = input.consume_shortcut_key(self.shortcuts.pan_up);
-			scroll_down = input.consume_shortcut_key(self.shortcuts.pan_down);
+			scroll_up = input.consume_shortcut_key(self.config.shortcuts.pan_up);
+			scroll_down = input.consume_shortcut_key(self.config.shortcuts.pan_down);
 		});
 
 		// If the current entry was playing, pause it
@@ -1505,7 +1463,10 @@ impl EguiApp {
 												&this.dir_reader,
 												&this.thread_pool,
 												ui,
-												this.thumbnails_dir.as_ref().unwrap_or_else(|| this.dirs.thumbnails()),
+												this.config
+													.thumbnails_cache
+													.as_ref()
+													.unwrap_or_else(|| this.dirs.thumbnails()),
 											)?
 											else {
 												ui.vertical_centered(|ui| {
@@ -1622,15 +1583,15 @@ impl eframe::App for EguiApp {
 		let mut toggle_display_mode = false;
 		let mut set_sort_order = None;
 		ui.input_mut(|input| {
-			fullscreen = input.consume_shortcut_key(self.shortcuts.fullscreen);
+			fullscreen = input.consume_shortcut_key(self.config.shortcuts.fullscreen);
 
-			exit_fullscreen_or_quit = input.consume_shortcut_key(self.shortcuts.exit_fullscreen_or_quit);
+			exit_fullscreen_or_quit = input.consume_shortcut_key(self.config.shortcuts.exit_fullscreen_or_quit);
 
-			quit = input.consume_shortcut_key(self.shortcuts.quit);
+			quit = input.consume_shortcut_key(self.config.shortcuts.quit);
 
-			toggle_display_mode = input.consume_shortcut_key(self.shortcuts.toggle_display_mode);
+			toggle_display_mode = input.consume_shortcut_key(self.config.shortcuts.toggle_display_mode);
 
-			for (&kind, &key) in &self.shortcuts.sort {
+			for (&kind, &key) in &self.config.shortcuts.sort {
 				if input.consume_shortcut_key(key) {
 					let mut sort_order = self.dir_reader.sort_order();
 					match sort_order.kind == kind {

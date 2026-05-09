@@ -1,7 +1,10 @@
 //! Configuration
 
 // Imports
-use {crate::shortcut::Shortcuts, std::path::PathBuf};
+use {
+	crate::shortcut::Shortcuts,
+	std::{path::Path, sync::Arc},
+};
 
 /// Configuration
 #[derive(Clone, Debug)]
@@ -9,11 +12,11 @@ use {crate::shortcut::Shortcuts, std::path::PathBuf};
 pub struct Config {
 	/// Thumbnails cache
 	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub thumbnails_cache: Option<PathBuf>,
+	pub thumbnails_cache: Option<Arc<Path>>,
 
 	/// Scripts directory
 	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub scripts_dir: Option<PathBuf>,
+	pub scripts_dir: Option<Arc<Path>>,
 
 	/// Preload previous/next
 	pub preload: [usize; 2],
