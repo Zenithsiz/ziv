@@ -181,7 +181,7 @@ struct Controls {
 #[expect(clippy::struct_excessive_bools, reason = "TODO")]
 struct EguiApp {
 	config_path:              PathBuf,
-	_dirs:                    Arc<Dirs>,
+	dirs:                     Arc<Dirs>,
 	thread_pool:              PriorityThreadPool,
 	dir_reader:               DirReader,
 	next_frame_idx:           usize,
@@ -216,6 +216,8 @@ struct EguiApp {
 	#[debug(ignore)]
 	empty_image_data: egui::ImageData,
 
+	thumbnails_dir: Option<Arc<Path>>,
+
 	loaded_thumbnails: EntryLoadedThumbnails,
 	loaded_displays:   EntryLoadedDisplays,
 }
@@ -244,7 +246,7 @@ impl EguiApp {
 		let thumbnails_dir = config.thumbnails_cache.map(Arc::from);
 		fs::create_dir_all(thumbnails_dir.as_ref().unwrap_or_else(|| dirs.thumbnails()))
 			.context("Unable to create thumbnails directory")?;
-		let loaded_thumbnails = EntryLoadedThumbnails::new(thumbnails_dir, Arc::clone(dirs.thumbnails()));
+		let loaded_thumbnails = EntryLoadedThumbnails::new();
 
 		// Get the scripts
 		let scripts_dir = config.scripts_dir.map(Arc::from);
@@ -267,7 +269,7 @@ impl EguiApp {
 
 		Ok(Self {
 			config_path,
-			_dirs: dirs,
+			dirs,
 			thread_pool,
 			dir_reader,
 			next_frame_idx: 0,
@@ -304,6 +306,7 @@ impl EguiApp {
 			loading_entries: vec![],
 			texture_options: egui::TextureOptions::LINEAR,
 			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
+			thumbnails_dir,
 			loaded_thumbnails,
 			loaded_displays,
 		})
@@ -312,7 +315,7 @@ impl EguiApp {
 	/// Saves the configuration
 	fn save_config(&self) -> Result<(), AppError> {
 		let config = Config {
-			thumbnails_cache: self.loaded_thumbnails.specified_dir().map(|dir| dir.to_path_buf()),
+			thumbnails_cache: self.thumbnails_dir.as_ref().map(|dir| dir.to_path_buf()),
 			scripts_dir:      self.scripts_dir.as_deref().map(PathBuf::from),
 			preload:          [self.preload_prev, self.preload_next],
 			shortcuts:        self.shortcuts.clone(),
@@ -1502,6 +1505,7 @@ impl EguiApp {
 												&this.dir_reader,
 												&this.thread_pool,
 												ui,
+												this.thumbnails_dir.as_ref().unwrap_or_else(|| this.dirs.thumbnails()),
 											)?
 											else {
 												ui.vertical_centered(|ui| {

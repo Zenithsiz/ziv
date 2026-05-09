@@ -19,29 +19,17 @@ use {
 #[derive(Debug)]
 pub struct EntryLoadedThumbnails {
 	thumbnails: LoadableLru<DirEntry, EntryThumbnail>,
-
-	// TODO: We shouldn't have to care about the specified/default
-	//       and instead should just receive a single directory.
-	specified_dir: Option<Arc<Path>>,
-	default_dir:   Arc<Path>,
 }
 
 impl EntryLoadedThumbnails {
 	/// Creates the thumbnails, with none loaded
-	pub fn new(specified_dir: Option<Arc<Path>>, default_dir: Arc<Path>) -> Self {
+	pub fn new() -> Self {
 		Self {
 			// Note: At the start, we allow an unbounded number of thumbnails,
 			//       since we'll only get resized after each frame, when the user
 			//       knows how many thumbnails they rendered.
 			thumbnails: LoadableLru::new(usize::MAX),
-			specified_dir,
-			default_dir,
 		}
-	}
-
-	/// Returns the specified thumbnails directory, if any
-	pub const fn specified_dir(&self) -> Option<&Arc<Path>> {
-		self.specified_dir.as_ref()
 	}
 
 	/// Sets the maximum number of thumbnails
@@ -56,8 +44,8 @@ impl EntryLoadedThumbnails {
 		dir_reader: &DirReader,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
+		thumbnails_dir: &Arc<Path>,
 	) -> Result<Option<EntryThumbnail>, AppError> {
-		let thumbnails_dir = self.specified_dir.as_ref().unwrap_or(&self.default_dir);
 		self.thumbnails.get_or_load(entry, thread_pool, Priority::LOW, move || {
 			let mut thumbnail_progress = dir_reader.thumbnail_progress_update();
 			thumbnail_progress.set_loading();
