@@ -132,7 +132,7 @@ fn run() -> Result<(), AppError> {
 		native_options,
 		Box::new(|cc| {
 			let app =
-				EguiApp::new(cc, config_path, config, dirs, thread_pool, path).map_err(AppError::into_std_error)?;
+				EguiApp::new(cc, config_path, config, dirs, thread_pool, path).map_err(|err| format!("{err:?}"))?;
 			Ok(Box::new(app))
 		}),
 	)
