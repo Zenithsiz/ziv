@@ -7,6 +7,7 @@ pub mod loaded_displays;
 pub mod loaded_thumbnails;
 pub mod source;
 pub mod thumbnail;
+pub mod thumbnail_db;
 pub mod video;
 
 // Exports
@@ -16,6 +17,7 @@ pub use self::{
 	loaded_thumbnails::EntryLoadedThumbnails,
 	source::{EntrySource, EntrySourceZip},
 	thumbnail::EntryThumbnail,
+	thumbnail_db::ThumbnailDb,
 	video::EntryVideo,
 };
 

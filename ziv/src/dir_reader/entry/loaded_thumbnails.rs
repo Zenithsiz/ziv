@@ -2,13 +2,12 @@
 
 // Imports
 use {
-	super::{DirEntry, EntryThumbnail},
+	super::{DirEntry, EntryThumbnail, ThumbnailDb},
 	crate::{
 		dir_reader::DirReader,
 		util::{AppError, LoadableLru, PriorityThreadPool, priority_thread_pool::Priority},
 	},
 	app_error::Context,
-	std::{path::Path, sync::Arc},
 	zutil_cloned::cloned,
 };
 
@@ -44,13 +43,13 @@ impl EntryLoadedThumbnails {
 		dir_reader: &DirReader,
 		thread_pool: &PriorityThreadPool,
 		egui_ctx: &egui::Context,
-		thumbnails_dir: &Arc<Path>,
+		thumbnails_db: &ThumbnailDb,
 	) -> Result<Option<EntryThumbnail>, AppError> {
 		self.thumbnails.get_or_load(entry, thread_pool, Priority::LOW, move || {
 			let mut thumbnail_progress = dir_reader.thumbnail_progress_update();
 			thumbnail_progress.set_loading();
 
-			#[cloned(egui_ctx, thumbnails_dir)]
+			#[cloned(egui_ctx, thumbnails_db)]
 			move |entry: &DirEntry| {
 				let source = entry.source();
 				let data = entry.data();
@@ -58,7 +57,7 @@ impl EntryLoadedThumbnails {
 				// TODO: Requesting a repaint inside of this closure is the wrong
 				//       thing to do, since it's possible for that repaint to happen
 				//       before the thumbnail gets added to the lru.
-				EntryThumbnail::new(&egui_ctx, &thumbnails_dir, &source, data, &mut thumbnail_progress)
+				EntryThumbnail::new(&egui_ctx, &thumbnails_db, &source, data, &mut thumbnail_progress)
 					.inspect(|_| egui_ctx.request_repaint())
 					.context("Unable to create thumbnail")
 			}

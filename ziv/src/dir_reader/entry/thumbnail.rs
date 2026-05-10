@@ -2,17 +2,16 @@
 
 // Imports
 use {
-	super::{EntryData, EntryDisplayGuess, EntrySource, video},
+	super::{EntryData, EntryDisplayGuess, EntrySource, ThumbnailDb, video},
 	crate::{
 		dir_reader::ThumbnailProgressGuard,
 		util::{AppError, EguiCtxLoadImage, EguiTextureHandle},
 	},
-	app_error::{Context, app_error},
+	app_error::Context,
 	core::time::Duration,
 	ffmpeg_next::Rescale,
 	image::DynamicImage,
 	std::path::Path,
-	url::Url,
 };
 
 /// Entry thumbnail
@@ -26,7 +25,7 @@ impl EntryThumbnail {
 	/// Creates a new thumbnail
 	pub fn new(
 		egui_ctx: &egui::Context,
-		thumbnails_dir: &Path,
+		thumbnails_db: &ThumbnailDb,
 		source: &EntrySource,
 		data: &EntryData,
 		thumbnail_progress: &mut ThumbnailProgressGuard,
@@ -41,75 +40,70 @@ impl EntryThumbnail {
 				zip_path_absolute.join(zip.file_name())
 			},
 		};
-		let entry_path_uri = Url::from_file_path(&entry_path)
-			.map_err(|()| app_error!("Unable to turn path into url: {entry_path:?}"))?;
-		let entry_path_md5 = md5::compute(entry_path_uri.as_str());
-		// TODO: Should we be using `png`s for the thumbnails?
-		let thumbnail_file_name = format!("{entry_path_md5:#x}.png");
-		let thumbnail_path = thumbnails_dir.join(thumbnail_file_name);
 
-		let (thumbnail, thumbnail_source) = match image::open(&thumbnail_path) {
+		let thumbnail = match thumbnails_db
+			.thumbnail_image(&entry_path)
+			.context("Unable to get thumbnail from database")?
+		{
 			// TODO: If the file is newer than our thumbnail, we should invalidate it.
-			//       Unfortunately, we can't check this without loading it somehow, so
-			//       the user might only see new thumbnails when loading the image.
-			Ok(image) => (image, EntrySource::Path(thumbnail_path.into())),
-			Err(_) => {
+			//       Unfortunately, we can't check this without loading the entry
+			//       metadata, which isn't guaranteed to be loaded.
+			Some((_date_added, thumbnail)) => thumbnail,
+			None => {
 				thumbnail_progress.set_generating();
 				let EntryData::DisplayGuess(display_kind) = data else {
 					return Ok(Self::NonMedia);
 				};
 
-				let (thumbnail, thumbnail_source) = match *display_kind {
+				let (thumbnail, should_save) = match *display_kind {
 					EntryDisplayGuess::Image { format } => {
 						// If the image is thumbnail sized, just use it instead of generating a thumbnail
 						let image = super::image::open_with_format(source, format)?;
 						match image.width() <= 256 && image.height() <= 256 {
 							true => {
-								tracing::debug!(source = ?source.name(), "Using image itself as the thumbnail");
-								(image, source.clone())
+								tracing::debug!(?entry_path, "Using image itself as the thumbnail");
+								(image, false)
 							},
 							false => {
-								tracing::debug!(?thumbnail_path, source = ?source.name(), "Generating thumbnail from image");
-								let thumbnail = image.thumbnail(256, 256);
-								(thumbnail, EntrySource::Path(thumbnail_path.into()))
+								tracing::debug!(?entry_path, "Generating thumbnail from image");
+								let image = image.thumbnail(256, 256);
+								(image, true)
 							},
 						}
 					},
-					// Note: Despite `image` supporting GIFs, we create the thumbnail as a video
 					EntryDisplayGuess::Video => match source {
 						EntrySource::Path(path) => {
-							tracing::debug!(?thumbnail_path, ?path, "Generating thumbnail from video");
-
-							let thumbnail = self::video_thumbnail(path)?;
-							(thumbnail, EntrySource::Path(thumbnail_path.into()))
+							tracing::debug!(?path, "Generating thumbnail from video");
+							let image = self::video_thumbnail(path)?;
+							(image, true)
 						},
 						EntrySource::Zip(_) =>
 							app_error::bail!("Thumbnails of videos inside of a zip file aren't supported yet"),
 					},
 				};
 
-				// If we aren't using the image itself as a thumbnail, save it
-				if let EntrySource::Path(thumbnail_path) = &thumbnail_source &&
-					let EntrySource::Path(entry_path) = source &&
-					thumbnail_path != entry_path
-				{
-					assert!(
-						thumbnail_path.starts_with(thumbnails_dir),
-						"Thumbnail path wasn't inside of thumbnail directory"
-					);
-
-					// TODO: Make saving the thumbnail a non-fatal error
-					thumbnail.save(thumbnail_path).context("Unable to save thumbnail")?;
+				// Save it if we should
+				if should_save {
+					match thumbnails_db.add_thumbnail_image(&entry_path, DEFAULT_FORMAT, &thumbnail) {
+						Ok(size) => tracing::info!(
+							"Saved thumbnail for {entry_path:?} ({})",
+							humansize::format_size(size, humansize::BINARY)
+						),
+						Err(err) => tracing::warn!("Unable to save thumbnail for {entry_path:?}: {err:?}"),
+					}
 				}
 
-				(thumbnail, thumbnail_source)
+				thumbnail
 			},
 		};
 
-		let texture = egui_ctx.load_image(thumbnail_source.name(), thumbnail);
+		let texture = egui_ctx.load_image(format!("thumbnail://{}", entry_path.display()), thumbnail);
 		Ok(Self::Image(texture))
 	}
 }
+
+/// Thumbnail format
+const DEFAULT_FORMAT: image::ImageFormat = image::ImageFormat::Jpeg;
 
 /// Creates a thumbnail for a video
 // TODO: Deduplicate this with `super::video`.

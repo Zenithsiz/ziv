@@ -17,9 +17,8 @@ pub struct Dirs {
 	/// Project dirs
 	inner: ProjectDirs,
 
-	/// Thumbnail directory
-	// TODO: Use the xdg spec thumbnail directory instead of our own?
-	thumbnails: OnceLock<Arc<Path>>,
+	/// Thumbnail database
+	thumbnails_db: OnceLock<Arc<Path>>,
 
 	/// Scripts directory
 	scripts: OnceLock<Arc<Path>>,
@@ -35,17 +34,17 @@ impl Dirs {
 
 		Ok(Self {
 			inner,
-			thumbnails: OnceLock::new(),
+			thumbnails_db: OnceLock::new(),
 			scripts: OnceLock::new(),
 			config: OnceLock::new(),
 		})
 	}
 
-	/// Returns the thumbnails directory
-	pub fn thumbnails(&self) -> &Arc<Path> {
-		self.thumbnails.get_or_init(|| {
-			let path = self.inner.cache_dir().join("thumbnails");
-			tracing::info!("Thumbnails directory: {path:?}");
+	/// Returns the thumbnail database
+	pub fn thumbnail_db(&self) -> &Arc<Path> {
+		self.thumbnails_db.get_or_init(|| {
+			let path = self.inner.cache_dir().join("thumbnails.sqlite");
+			tracing::info!("Thumbnail database: {path:?}");
 			path.into()
 		})
 	}

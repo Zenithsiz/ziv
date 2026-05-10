@@ -12,6 +12,7 @@
 		"loadables",
 		"mjpeg",
 		"natord",
+		"rusqlite",
 		"seeked",
 		"walkdir",
 		"zutil"

@@ -50,6 +50,7 @@ use {
 				EntryLoadedThumbnails,
 				EntrySource,
 				EntryThumbnail,
+				ThumbnailDb,
 				video::PlayingStatus,
 			},
 		},
@@ -174,7 +175,7 @@ impl DisplayMode {
 struct EguiApp {
 	config_path:              PathBuf,
 	config:                   Config,
-	dirs:                     Arc<Dirs>,
+	_dirs:                    Arc<Dirs>,
 	thread_pool:              PriorityThreadPool,
 	dir_reader:               DirReader,
 	next_frame_idx:           usize,
@@ -206,6 +207,8 @@ struct EguiApp {
 
 	loaded_thumbnails: EntryLoadedThumbnails,
 	loaded_displays:   EntryLoadedDisplays,
+
+	thumbnail_db: ThumbnailDb,
 }
 
 impl EguiApp {
@@ -229,8 +232,8 @@ impl EguiApp {
 		});
 
 		// Setup the thumbnails
-		let thumbnails_dir = config.thumbnails_cache.as_ref().unwrap_or_else(|| dirs.thumbnails());
-		fs::create_dir_all(thumbnails_dir).context("Unable to create thumbnails directory")?;
+		let thumbnail_db_path = config.thumbnail_db.as_ref().unwrap_or_else(|| dirs.thumbnail_db());
+		let thumbnail_db = ThumbnailDb::new(thumbnail_db_path).context("Unable to create thumbnail db")?;
 		let loaded_thumbnails = EntryLoadedThumbnails::new();
 
 		// Get the scripts
@@ -254,7 +257,7 @@ impl EguiApp {
 		Ok(Self {
 			config_path,
 			config,
-			dirs,
+			_dirs: dirs,
 			thread_pool,
 			dir_reader,
 			next_frame_idx: 0,
@@ -283,6 +286,7 @@ impl EguiApp {
 			empty_image_data: egui::ColorImage::new([0, 0], vec![]).into(),
 			loaded_thumbnails,
 			loaded_displays,
+			thumbnail_db,
 		})
 	}
 
@@ -1460,10 +1464,7 @@ impl EguiApp {
 												&this.dir_reader,
 												&this.thread_pool,
 												ui,
-												this.config
-													.thumbnails_cache
-													.as_ref()
-													.unwrap_or_else(|| this.dirs.thumbnails()),
+												&this.thumbnail_db,
 											)?;
 
 											match thumbnail {

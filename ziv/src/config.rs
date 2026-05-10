@@ -10,9 +10,9 @@ use {
 #[derive(Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Config {
-	/// Thumbnails cache
+	/// Thumbnail database
 	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub thumbnails_cache: Option<Arc<Path>>,
+	pub thumbnail_db: Option<Arc<Path>>,
 
 	/// Scripts directory
 	#[serde(skip_serializing_if = "Option::is_none", default)]
@@ -48,11 +48,11 @@ pub struct Controls {
 impl Default for Config {
 	fn default() -> Self {
 		Self {
-			thumbnails_cache: None,
-			scripts_dir:      None,
-			preload:          [1, 1],
-			shortcuts:        Shortcuts::default(),
-			controls:         Controls {
+			thumbnail_db: None,
+			scripts_dir:  None,
+			preload:      [1, 1],
+			shortcuts:    Shortcuts::default(),
+			controls:     Controls {
 				zoom_sensitivity:         200.0,
 				scroll_sensitivity:       2.0,
 				keyboard_pan_sensitivity: 0.2,
