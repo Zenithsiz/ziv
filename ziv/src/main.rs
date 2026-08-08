@@ -10,7 +10,6 @@
 	exact_size_is_empty,
 	decl_macro,
 	range_into_bounds,
-	path_is_empty,
 	yeet_expr,
 	impl_trait_in_assoc_type,
 	yield_expr,
@@ -500,7 +499,7 @@ impl EguiApp {
 				}
 			});
 
-			egui::CentralPanel::default().show_inside(ui, |ui| {
+			egui::CentralPanel::default().show(ui, |ui| {
 				ui.horizontal(|ui| {
 					for &tab in SettingsTab::VARIANTS {
 						ui.selectable_value(&mut self.settings_tab, tab, tab.to_string());
@@ -1226,7 +1225,7 @@ impl EguiApp {
 			fill: egui::Color32::BLACK,
 			..egui::Frame::NONE
 		};
-		let panel_output = egui::CentralPanel::default().frame(panel_frame).show_inside(ui, |ui| {
+		let panel_output = egui::CentralPanel::default().frame(panel_frame).show(ui, |ui| {
 			let window_response = ui.interact(
 				egui::Rect::from_min_size(egui::Pos2::ZERO, ui.available_size()),
 				egui::Id::new("whole-screen"),
@@ -1354,7 +1353,7 @@ impl EguiApp {
 		egui::Panel::top("display-list-controls")
 			.show_separator_line(false)
 			.frame(bg_frame)
-			.show_inside(ui, |ui| {
+			.show(ui, |ui| {
 				self.draw_info_window(ui, None);
 
 				ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -1377,7 +1376,7 @@ impl EguiApp {
 				}
 			});
 
-		egui::CentralPanel::default().frame(bg_frame).show_inside(ui, |ui| {
+		egui::CentralPanel::default().frame(bg_frame).show(ui, |ui| {
 			let total_entries = self.dir_reader.len();
 			let entry_rows = total_entries.div_ceil(self.entries_per_row);
 
