@@ -13,9 +13,6 @@ version     = "0.1.8"
 
 [workspace.dependencies]
 
-# Workspace
-ziv = { path = "ziv" }
-
 app-error             = "0.1.1"
 bitflags              = "2.13.1"
 clap                  = "4.6.6"
@@ -39,7 +36,6 @@ notify-debouncer-full = "0.7.0"
 oneshot               = "0.2.1"
 opener                = "0.8.5"
 parking_lot           = "0.12.5"
-ref-cast              = "1.0.26"
 rusqlite              = "0.40.2"
 serde                 = "1.0.229"
 strum                 = "0.28.0"
@@ -70,7 +66,7 @@ clippy.struct_field_names = "allow"
 
 # Misc
 clippy.empty_enums                  = "allow"
-clippy.items-after-statements       = "allow"
+clippy.items_after_statements       = "allow"
 clippy.unnecessary_debug_formatting = "allow"
 clippy.wildcard_imports             = "allow"
 

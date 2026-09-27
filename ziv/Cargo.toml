@@ -38,7 +38,6 @@ notify-debouncer-full = { workspace = true }
 oneshot               = { features = ["std"], workspace = true }
 opener                = { features = ["reveal"], workspace = true }
 parking_lot           = { workspace = true }
-ref-cast              = { workspace = true }
 rusqlite              = { features = ["fallible_uint", "time"], workspace = true }
 serde                 = { features = ["derive", "unstable"], workspace = true }
 strum                 = { features = ["derive"], workspace = true }

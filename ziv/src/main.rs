@@ -16,7 +16,6 @@
 	gen_blocks,
 	try_trait_v2,
 	try_trait_v2_residual,
-	never_type,
 	try_trait_v2_yeet,
 	random,
 	macro_derive,
