@@ -1340,7 +1340,8 @@ impl EguiApp {
 		if let Some(cur_entry) = self.dir_reader.cur_entry() &&
 			let Some(EntryDisplay::Video(video)) = self.try_with_entry(&cur_entry, |this, cur_entry| {
 				this.loaded_displays.get_if_loaded(cur_entry)
-			}) && video.set_offscreen()
+			}) &&
+			video.set_offscreen()
 		{
 			video.pause();
 		}
@@ -1400,7 +1401,9 @@ impl EguiApp {
 				return;
 			}
 
-			let mut scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
+			let mut scroll_area = egui::ScrollArea::vertical()
+				.auto_shrink(false)
+				.scroll_source(egui::scroll_area::ScrollSource::ALL);
 
 			let should_update_scroll = self.display_mode_switched ||
 				self.entries_per_row_changed ||
