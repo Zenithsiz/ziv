@@ -339,7 +339,7 @@ impl EguiApp {
 		Ok(())
 	}
 
-	fn reset_on_change_entry(&mut self, prev_entry: &DirEntry, _new_entry: &CurEntry) {
+	fn reset_on_change_entry(&mut self, prev_entry: &DirEntry) {
 		self.pan_zoom = PanZoom {
 			offset: egui::Vec2::ZERO,
 			zoom:   0.0,
@@ -1201,19 +1201,19 @@ impl EguiApp {
 
 		if move_prev && let Some(entry) = self.dir_reader.cur_entry_set_prev() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(&prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry);
 		}
 		if move_next && let Some(entry) = self.dir_reader.cur_entry_set_next() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(&prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry);
 		}
 		if move_first && let Some(entry) = self.dir_reader.cur_entry_set_first() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(&prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry);
 		}
 		if move_last && let Some(entry) = self.dir_reader.cur_entry_set_last() {
 			let prev_entry = mem::replace(&mut cur_entry, entry);
-			self.reset_on_change_entry(&prev_entry, &cur_entry);
+			self.reset_on_change_entry(&prev_entry);
 		}
 
 		let cur_entry = cur_entry;
@@ -1330,12 +1330,40 @@ impl EguiApp {
 		let mut goto_entry = None;
 		let mut set_icon = None;
 
-		let mut scroll_up = false;
-		let mut scroll_down = false;
+		let mut move_prev = false;
+		let mut move_next = false;
+		let mut move_up = false;
+		let mut move_down = false;
 		ui.input_mut(|input| {
-			scroll_up = input.consume_shortcut_key(self.config.shortcuts.pan_up);
-			scroll_down = input.consume_shortcut_key(self.config.shortcuts.pan_down);
+			move_prev = input.consume_shortcut_key(self.config.shortcuts.prev);
+			move_next = input.consume_shortcut_key(self.config.shortcuts.next);
+
+			move_up = input.consume_shortcut_key(self.config.shortcuts.pan_up);
+			move_down = input.consume_shortcut_key(self.config.shortcuts.pan_down);
 		});
+		if let Some(cur_entry) = self.dir_reader.cur_entry() {
+			// TODO: Deduplicate this with `draw_display_image`-
+			if (move_prev && self.dir_reader.cur_entry_set_prev().is_some()) ||
+				(move_next && self.dir_reader.cur_entry_set_next().is_some())
+			{
+				self.reset_on_change_entry(&cur_entry);
+			}
+			// TODO: Don't ignore errors here
+			// TODO: We're getting a whole collection of entries here when we could just keep ahead/behind...
+			else if move_up &&
+				let Ok(entries) = self.dir_reader.before_entry(&cur_entry, self.entries_per_row) &&
+				let Some(entry) = entries.into_iter().last()
+			{
+				self.dir_reader.cur_entry_set(entry);
+				self.reset_on_change_entry(&cur_entry);
+			} else if move_down &&
+				let Ok(entries) = self.dir_reader.after_entry(&cur_entry, self.entries_per_row) &&
+				let Some(entry) = entries.into_iter().last()
+			{
+				self.dir_reader.cur_entry_set(entry);
+				self.reset_on_change_entry(&cur_entry);
+			}
+		}
 
 		// If the current entry was playing, pause it
 		// TODO: Not do this here
@@ -1409,7 +1437,8 @@ impl EguiApp {
 
 			let should_update_scroll = self.display_mode_switched ||
 				self.entries_per_row_changed ||
-				self.cur_frame_size != self.last_frame_size;
+				self.cur_frame_size != self.last_frame_size ||
+				(move_prev || move_next || move_up || move_down);
 			if should_update_scroll &&
 				let Some(cur_entry) = self.dir_reader.cur_entry() &&
 				let Some(idx) = cur_entry.idx
@@ -1422,14 +1451,6 @@ impl EguiApp {
 			}
 
 			scroll_area.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
-				// TODO: These amounts should be configurable
-				if scroll_up {
-					ui.scroll_with_delta(egui::vec2(0.0, 100.0));
-				}
-				if scroll_down {
-					ui.scroll_with_delta(egui::vec2(0.0, -100.0));
-				}
-
 				let mut thumbnails_visible = 0;
 				egui::Grid::new("display-list-entries")
 					.num_columns(self.entries_per_row)
