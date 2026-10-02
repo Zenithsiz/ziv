@@ -15,3 +15,7 @@
 - Create some wrapper to generate the 4 `<field>_blocking`, `<field>_load`, `<field>_if_loaded` and `<field>_is_loaded` automatically.
 
 - Add support for plugins (using wasm?)
+
+- When going back to display list, stay in the same exact position, including any offset.
+
+- Thumbnails need to store time so they can get updated if there's a mismatch.
