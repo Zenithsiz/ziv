@@ -1328,6 +1328,7 @@ impl EguiApp {
 	fn draw_display_list(&mut self, ui: &mut egui::Ui) {
 		let mut select_entry = None;
 		let mut goto_entry = None;
+		let mut set_icon = None;
 
 		let mut scroll_up = false;
 		let mut scroll_down = false;
@@ -1534,6 +1535,9 @@ impl EguiApp {
 										if response.double_clicked() {
 											goto_entry = Some(entry.clone());
 										}
+										if response.hovered() {
+											set_icon = Some(egui::CursorIcon::PointingHand);
+										}
 
 										self.draw_image_context_menu(&entry, &response);
 
@@ -1577,6 +1581,10 @@ impl EguiApp {
 		if let Some(entry) = goto_entry {
 			self.dir_reader.cur_entry_set(entry);
 			self.display_mode = DisplayMode::Image;
+		}
+
+		if let Some(cursor_icon) = set_icon {
+			ui.set_cursor_icon(cursor_icon);
 		}
 	}
 }
