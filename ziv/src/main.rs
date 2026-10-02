@@ -19,7 +19,8 @@
 	try_trait_v2_yeet,
 	random,
 	macro_derive,
-	min_adt_const_params
+	min_adt_const_params,
+	clamp_to
 )]
 
 // Modules
@@ -182,6 +183,7 @@ struct EguiApp {
 	view_mode:                ViewMode,
 	display_mode:             DisplayMode,
 	display_mode_switched:    bool,
+	display_mode_offset:      f32,
 	entries_per_row:          usize,
 	entries_per_row_changed:  bool,
 	scripts:                  Arc<[PathBuf]>,
@@ -267,6 +269,7 @@ impl EguiApp {
 			view_mode: ViewMode::FitWindow,
 			display_mode: DisplayMode::Image,
 			display_mode_switched: false,
+			display_mode_offset: 0.0,
 			scripts,
 			running_scripts: vec![],
 			vertical_pan_smooth: 0.0,
@@ -1431,26 +1434,31 @@ impl EguiApp {
 				return;
 			}
 
-			let mut scroll_area = egui::ScrollArea::vertical()
-				.auto_shrink(false)
-				.scroll_source(egui::scroll_area::ScrollSource::ALL);
-
-			let should_update_scroll = self.display_mode_switched ||
-				self.entries_per_row_changed ||
-				self.cur_frame_size != self.last_frame_size ||
-				(move_prev || move_next || move_up || move_down);
-			if should_update_scroll &&
+			// Update the offset, if needed
+			let should_update = self.entries_per_row_changed || (move_prev || move_next || move_up || move_down);
+			if should_update &&
 				let Some(cur_entry) = self.dir_reader.cur_entry() &&
-				let Some(idx) = cur_entry.idx
+				let Some(cur_idx) = cur_entry.idx
 			{
-				let row = idx / self.entries_per_row;
-				let column = idx % self.entries_per_row;
+				let row = cur_idx / self.entries_per_row;
+				let column = cur_idx % self.entries_per_row;
 				// TODO: Why do we need a further offset of 3.0 here?
-				let offset = egui::vec2(0.0, row_size.y + 3.0) * egui::vec2(column as f32, row as f32);
-				scroll_area = scroll_area.scroll_offset(offset);
+				let offset = egui::vec2(0.0, row_size.y + 3.0) * egui::vec2(column as f32, row as f32) +
+					egui::vec2(0.0, row_size.y / 2.0 - ui.available_height() / 2.0);
+				self.display_mode_offset = offset.y;
 			}
 
-			scroll_area.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
+			// TODO: Why does 3.0 keep showing up everywhere?
+			let max_offset = (entry_rows.next_multiple_of(self.entries_per_row) - 1) as f32 * (row_size.y + 3.0) -
+				ui.available_height();
+			self.display_mode_offset = self.display_mode_offset.clamp_to(0.0..=max_offset);
+
+			let scroll_area = egui::ScrollArea::vertical()
+				.auto_shrink(false)
+				.scroll_source(egui::scroll_area::ScrollSource::ALL)
+				.scroll_offset(egui::vec2(0.0, self.display_mode_offset));
+
+			let scroll_output = scroll_area.show_rows(ui, row_size.y, entry_rows, |ui, rows| {
 				let mut thumbnails_visible = 0;
 				egui::Grid::new("display-list-entries")
 					.num_columns(self.entries_per_row)
@@ -1593,6 +1601,8 @@ impl EguiApp {
 				//       the thumbnails.
 				self.loaded_thumbnails.set_max(2 * thumbnails_visible);
 			});
+
+			self.display_mode_offset = scroll_output.state.offset.y;
 		});
 
 		if let Some(entry) = select_entry {
