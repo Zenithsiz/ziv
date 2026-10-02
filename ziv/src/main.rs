@@ -1326,6 +1326,7 @@ impl EguiApp {
 	}
 
 	fn draw_display_list(&mut self, ui: &mut egui::Ui) {
+		let mut select_entry = None;
 		let mut goto_entry = None;
 
 		let mut scroll_up = false;
@@ -1527,6 +1528,9 @@ impl EguiApp {
 										}
 
 										let response = ui.allocate_response(image_size, egui::Sense::click());
+										if response.clicked() {
+											select_entry = Some(entry.clone());
+										}
 										if response.double_clicked() {
 											goto_entry = Some(entry.clone());
 										}
@@ -1541,6 +1545,9 @@ impl EguiApp {
 
 												// TODO: Should a double click on the text actually enter the image?
 												//       Maybe the user just wants to select it all.
+												if response.clicked() {
+													select_entry = Some(entry.clone());
+												}
 												if response.double_clicked() {
 													goto_entry = Some(entry.clone());
 												}
@@ -1562,6 +1569,10 @@ impl EguiApp {
 				self.loaded_thumbnails.set_max(2 * thumbnails_visible);
 			});
 		});
+
+		if let Some(entry) = select_entry {
+			self.dir_reader.cur_entry_set(entry);
+		}
 
 		if let Some(entry) = goto_entry {
 			self.dir_reader.cur_entry_set(entry);
