@@ -1440,22 +1440,36 @@ impl EguiApp {
 						for row in rows {
 							let idxs =
 								(row * self.entries_per_row)..((row + 1) * self.entries_per_row).min(total_entries);
-							let Some(entries) = self.dir_reader.entry_range(idxs) else {
+							let Some(entries) = self.dir_reader.entry_range(idxs.clone()) else {
 								continue;
 							};
 
-							for entry in entries {
+							for (entry, entry_idx) in entries.into_iter().zip(idxs) {
 								thumbnails_visible += 1;
 
 								let hovered_id = egui::Id::new(("display-list-hover", &entry));
 
 								let hovered = ui.data(|data| data.get_temp(hovered_id)).unwrap_or(false);
-								let stroke_color = match hovered {
-									true => egui::Color32::from_rgba_premultiplied(0xd0, 0xd0, 0xd0, 0xff),
-									false => egui::Color32::TRANSPARENT,
+								let cell_frame = match hovered {
+									true => {
+										let color = egui::Color32::from_rgba_premultiplied(0xd0, 0xd0, 0xd0, 0xff);
+										cell_frame.stroke(egui::Stroke::new(cell_frame.stroke.width, color))
+									},
+									false => cell_frame,
 								};
-								let cell_frame =
-									cell_frame.stroke(egui::Stroke::new(cell_frame.stroke.width, stroke_color));
+
+								let selected = self
+									.dir_reader
+									.cur_entry()
+									.and_then(|entry| entry.idx)
+									.is_some_and(|idx| idx == entry_idx);
+								let cell_frame = match selected {
+									true => {
+										let color = egui::Color32::from_rgba_premultiplied(0x30, 0x30, 0x30, 0xff);
+										cell_frame.fill(color)
+									},
+									false => cell_frame,
+								};
 
 								let frame_res = cell_frame.show(ui, |ui| {
 									ui.vertical(|ui| {
