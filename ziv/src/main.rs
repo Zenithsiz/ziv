@@ -1435,7 +1435,10 @@ impl EguiApp {
 			}
 
 			// Update the offset, if needed
-			let should_update = self.entries_per_row_changed || (move_prev || move_next || move_up || move_down);
+			let should_update = self.display_mode_switched ||
+				self.entries_per_row_changed ||
+				self.cur_frame_size != self.last_frame_size ||
+				(move_prev || move_next || move_up || move_down);
 			if should_update &&
 				let Some(cur_entry) = self.dir_reader.cur_entry() &&
 				let Some(cur_idx) = cur_entry.idx
